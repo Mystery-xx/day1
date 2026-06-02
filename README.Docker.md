@@ -7,7 +7,7 @@
 cp .env.example .env
 ```
 
-2. При необходимости отредактируйте `.env` (API ключ уже установлен)
+2. Отредактируйте `.env` и укажите ваши значения переменных
 
 3. Запустите контейнеры:
 ```bash
@@ -51,9 +51,9 @@ docker-compose up --build
 
 | Переменная | Значение по умолчанию | Описание |
 |-----------|----------------------|----------|
-| `AI_API_KEY` | `gpustack_...` | API ключ для доступа к ИИ |
-| `AI_API_URL` | `https://gpustack.data.lmru.tech/v1` | URL API |
-| `AI_MODEL` | `qwen3.5-397b-a17b` | Модель ИИ |
+| `AI_API_KEY` | (требуется) | API ключ для доступа к ИИ |
+| `AI_API_URL` | (требуется) | URL API |
+| `AI_MODEL` | (требуется) | Модель ИИ |
 | `DOCKER_FRONTEND_PORT` | `5173` | Порт frontend |
 | `DOCKER_BACKEND_PORT` | `8080` | Порт backend |
 

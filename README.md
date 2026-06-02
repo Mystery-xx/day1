@@ -80,8 +80,8 @@ ai-chat/
 | Переменная | Значение по умолчанию | Описание |
 |------------|----------------------|----------|
 | `AI_API_KEY` | (требуется) | API ключ для доступа к ИИ |
-| `AI_API_URL` | `https://gpustack.data.lmru.tech/v1` | Базовый URL ИИ API |
-| `AI_MODEL` | `qwen3.5-397b-a17b` | Название модели |
+| `AI_API_URL` | (требуется) | Базовый URL ИИ API |
+| `AI_MODEL` | (требуется) | Название модели |
 
 ## API Endpoints
 
@@ -105,7 +105,7 @@ ai-chat/
 **Решение**:
 1. Проверьте логи backend: `docker logs ai-chat-backend`
 2. Убедитесь что API ключ правильный в `.env`
-3. Проверьте доступность AI API: `curl https://gpustack.data.lmru.tech/v1/models`
+3. Проверьте доступность AI API: `curl $AI_API_URL/models`
 
 ### 503 Service Unavailable
 
