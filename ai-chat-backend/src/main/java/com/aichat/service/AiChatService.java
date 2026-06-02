@@ -12,8 +12,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import reactor.core.publisher.Mono;
-import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -62,15 +62,18 @@ public class AiChatService {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         
-        // Create HttpClient with custom response timeout
-        HttpClient httpClient = HttpClient.create()
-                .responseTimeout(Duration.ofSeconds(120));
-        
         this.webClient = WebClient.builder()
                 .baseUrl(properties.getUrl())
-                .clientConnector(new org.springframework.web.reactive.function.client.ReactorClientHttpConnector(httpClient))
+                .filter(timeoutFilter())
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
+    }
+    
+    private ExchangeFilterFunction timeoutFilter() {
+        return ExchangeFilterFunction.ofRequestProcessor(clientRequest -> 
+            Mono.just(clientRequest)
+                .timeout(Duration.ofSeconds(120))
+        );
     }
 
     public Mono<ChatResponse> sendMessage(ChatRequest request) {
