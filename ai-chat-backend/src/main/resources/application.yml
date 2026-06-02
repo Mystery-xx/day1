@@ -8,8 +8,7 @@ spring:
   application:
     name: ai-chat
   webflux:
-    connect-timeout: 30000
-    response-timeout: 120000
+    max-in-memory-size: 16MB
 
 ai:
   api:
