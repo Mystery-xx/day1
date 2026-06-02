@@ -22,7 +22,7 @@ public class WebClientConfig {
 
         // Create HttpClient with custom response timeout
         HttpClient httpClient = HttpClient.create(provider)
-                .responseTimeout(Duration.ofSeconds(60));
+                .responseTimeout(Duration.ofSeconds(120));
 
         // Create exchange strategies for max in-memory size
         ExchangeStrategies strategies = ExchangeStrategies.builder()
