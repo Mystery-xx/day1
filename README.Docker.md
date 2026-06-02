@@ -69,7 +69,7 @@ docker-compose up --build
                                                 ▼
                                          ┌──────────────┐
                                          │   AI API     │
-                                         │ gpustack...  │
+                                         │
                                          └──────────────┘
 ```
 
