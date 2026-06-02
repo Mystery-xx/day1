@@ -14,8 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -58,12 +56,9 @@ public class AiChatService {
             Если данных недостаточно, reservation может быть null или содержать только заполненные поля.
             """;
 
-    public AiChatService(AiChatProperties properties) {
+    public AiChatService(WebClient webClient, AiChatProperties properties) {
+        this.webClient = webClient;
         this.properties = properties;
-        this.webClient = WebClient.builder()
-                .baseUrl(properties.getUrl())
-                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
-                .build();
         this.objectMapper = new ObjectMapper();
     }
 
