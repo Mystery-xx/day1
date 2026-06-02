@@ -1,0 +1,33 @@
+# Note: 'version' field is obsolete in modern Docker Compose, kept for compatibility
+services:
+  backend:
+    build:
+      context: ./ai-chat-backend
+      dockerfile: Dockerfile
+    container_name: ai-chat-backend
+    environment:
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_API_URL=${AI_API_URL}
+      - AI_MODEL=${AI_MODEL}
+    ports:
+      - "8080:8080"
+    networks:
+      - ai-chat-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./ai-chat-frontend
+      dockerfile: Dockerfile
+    container_name: ai-chat-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - ai-chat-network
+    restart: unless-stopped
+
+networks:
+  ai-chat-network:
+    driver: bridge

@@ -1,0 +1,23 @@
+server:
+  port: 8080
+  address: 0.0.0.0
+  tomcat:
+    async-request-timeout: 120000
+
+spring:
+  application:
+    name: ai-chat
+  webflux:
+    connect-timeout: 30000
+    response-timeout: 120000
+
+ai:
+  api:
+    key: ${AI_API_KEY}
+    url: ${AI_API_URL}
+    model: ${AI_MODEL}
+
+logging:
+  level:
+    com.aichat: DEBUG
+    org.springframework.web: INFO
