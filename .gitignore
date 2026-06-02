@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# OpenCode runtime data
+.omo/
+
 # Java/Spring Boot
 target/
 *.class
