@@ -51,8 +51,8 @@ Browser (:5173) → React → Vite proxy /api → Spring Boot (:8080) → AI API
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AI_API_KEY` | (required) | API key for AI endpoint |
-| `AI_API_URL` | `https://gpustack.data.lmru.tech/v1` | AI API base URL |
-| `AI_MODEL` | `qwen3.5-397b-a17b` | Model name |
+| `AI_API_URL` | (required) | AI API base URL |
+| `AI_MODEL` | (required) | Model name |
 
 ## API Endpoints
 
@@ -71,4 +71,4 @@ Browser (:5173) → React → Vite proxy /api → Spring Boot (:8080) → AI API
 
 - Backend: Multi-stage Docker (Maven build → JRE runtime)
 - Frontend: Multi-stage Docker (Node build → Nginx serving static files)
-- Default model: `qwen3.5-397b-a17b` (397B parameter chat model)
+- Model: Configured via `AI_MODEL` environment variable
