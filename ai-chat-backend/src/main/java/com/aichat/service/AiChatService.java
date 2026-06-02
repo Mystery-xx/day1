@@ -3,6 +3,9 @@ package com.aichat.service;
 import com.aichat.config.AiChatProperties;
 import com.aichat.dto.ChatRequest;
 import com.aichat.dto.ChatResponse;
+import com.aichat.dto.Reservation;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -23,18 +26,53 @@ public class AiChatService {
 
     private final WebClient webClient;
     private final AiChatProperties properties;
+    private final ObjectMapper objectMapper;
+
+    private static final String SYSTEM_PROMPT = """
+            Ты помощник для бронирования столиков в ресторане.
+            Твоя задача - извлекать из диалога данные для заказа:
+            - restaurantAddress: адрес ресторана
+            - date: дата в формате YYYY-MM-DD
+            - time: время в формате HH:MM
+            - numberOfGuests: количество гостей (число)
+
+            После каждого ответа пользователя анализируй историю диалога и обновляй данные заказа.
+            Если пользователь изменил информацию (например, сначала сказал "4 гостя", потом "нет, 5 гостей"),
+            используй последнее значение.
+
+            Если все 4 поля заполнены, спроси пользователя: "Подтвердите заказ: [адрес], [дата] в [время] на [кол-во] гостей. Верно?"
+            Если пользователь подтверждает, верни финальное сообщение об успешном бронировании.
+
+            Возвращай ответ в формате JSON:
+            {
+              "content": "твой текстовый ответ пользователю",
+              "reservation": {
+                "restaurantAddress": "...",
+                "date": "...",
+                "time": "...",
+                "numberOfGuests": ...
+              }
+            }
+            Если данных недостаточно, reservation может быть null или содержать только заполненные поля.
+            """;
 
     public AiChatService(AiChatProperties properties) {
         this.properties = properties;
         this.webClient = WebClient.builder()
                 .baseUrl(properties.getUrl())
                 .build();
+        this.objectMapper = new ObjectMapper();
     }
 
     public Mono<ChatResponse> sendMessage(ChatRequest request) {
         logger.debug("Sending message to AI: {}", request.getMessage());
 
         List<Map<String, String>> messages = new ArrayList<>();
+
+        Map<String, String> systemMessage = new HashMap<>();
+        systemMessage.put("role", "system");
+        systemMessage.put("content", SYSTEM_PROMPT);
+        messages.add(systemMessage);
 
         if (request.getHistory() != null) {
             for (ChatRequest.Message msg : request.getHistory()) {
@@ -70,7 +108,10 @@ public class AiChatService {
                             Map<String, Object> firstChoice = choices.get(0);
                             Map<String, String> message = (Map<String, String>) firstChoice.get("message");
                             if (message != null) {
-                                return ChatResponse.success(message.get("content"));
+                                String content = message.get("content");
+                                Reservation reservation = parseReservation(content);
+                                String cleanContent = extractContentFromJson(content);
+                                return ChatResponse.successWithReservation(cleanContent, reservation);
                             }
                         }
                         return ChatResponse.error("Empty response from AI");
@@ -83,5 +124,48 @@ public class AiChatService {
                     logger.error("Error calling AI API", e);
                     return Mono.just(ChatResponse.error("Error calling AI: " + e.getMessage()));
                 });
+    }
+
+    private Reservation parseReservation(String content) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(content);
+            JsonNode reservationNode = rootNode.get("reservation");
+            
+            if (reservationNode == null || reservationNode.isNull()) {
+                return null;
+            }
+
+            Reservation reservation = new Reservation();
+            
+            if (reservationNode.has("restaurantAddress")) {
+                reservation.setRestaurantAddress(reservationNode.get("restaurantAddress").asText());
+            }
+            if (reservationNode.has("date")) {
+                reservation.setDate(reservationNode.get("date").asText());
+            }
+            if (reservationNode.has("time")) {
+                reservation.setTime(reservationNode.get("time").asText());
+            }
+            if (reservationNode.has("numberOfGuests")) {
+                reservation.setNumberOfGuests(reservationNode.get("numberOfGuests").asInt());
+            }
+
+            return reservation;
+        } catch (Exception e) {
+            logger.debug("Failed to parse reservation from response: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String extractContentFromJson(String content) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(content);
+            if (rootNode.has("content")) {
+                return rootNode.get("content").asText();
+            }
+            return content;
+        } catch (Exception e) {
+            return content;
+        }
     }
 }

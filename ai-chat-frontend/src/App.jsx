@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import ReservationPanel from './components/ReservationPanel'
 
 function App() {
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [reservation, setReservation] = useState(null)
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -33,6 +35,9 @@ function App() {
         setMessages([...newMessages, { role: 'error', content: data.error }])
       } else {
         setMessages([...newMessages, { role: 'assistant', content: data.content }])
+        if (data.reservation) {
+          setReservation(data.reservation)
+        }
       }
     } catch (error) {
       setMessages([...newMessages, { 
@@ -52,51 +57,55 @@ function App() {
   }
 
   return (
-    <div className="chat-container">
-      <div className="chat-header">
-        AI Chat
-      </div>
+    <div className="app-container">
+      <div className="chat-section">
+        <div className="chat-header">
+          AI Chat
+        </div>
 
-      <div className="chat-messages">
-        {messages.length === 0 ? (
-          <div className="empty-state">
-            Начните чат с ИИ
-          </div>
-        ) : (
-          messages.map((message, index) => (
-            <div 
-              key={index} 
-              className={`message ${message.role}`}
-            >
-              {message.content}
+        <div className="chat-messages">
+          {messages.length === 0 ? (
+            <div className="empty-state">
+              Начните чат для бронирования столика
             </div>
-          ))
-        )}
-        {isLoading && (
-          <div className="message assistant">
-            <span className="loading"></span>
-          </div>
-        )}
+          ) : (
+            messages.map((message, index) => (
+              <div 
+                key={index} 
+                className={`message ${message.role}`}
+              >
+                {message.content}
+              </div>
+            ))
+          )}
+          {isLoading && (
+            <div className="message assistant">
+              <span className="loading"></span>
+            </div>
+          )}
+        </div>
+
+        <div className="chat-input-container">
+          <input
+            type="text"
+            className="chat-input"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Например: Хочу заказать столик на завтра..."
+            disabled={isLoading}
+          />
+          <button
+            className="send-button"
+            onClick={sendMessage}
+            disabled={isLoading || !inputValue.trim()}
+          >
+            {isLoading ? <span className="loading"></span> : 'Отправить'}
+          </button>
+        </div>
       </div>
 
-      <div className="chat-input-container">
-        <input
-          type="text"
-          className="chat-input"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Введите сообщение..."
-          disabled={isLoading}
-        />
-        <button
-          className="send-button"
-          onClick={sendMessage}
-          disabled={isLoading || !inputValue.trim()}
-        >
-          {isLoading ? <span className="loading"></span> : 'Отправить'}
-        </button>
-      </div>
+      <ReservationPanel reservation={reservation} />
     </div>
   )
 }
