@@ -2,6 +2,7 @@ package com.aichat.controller;
 
 import com.aichat.dto.ChatRequest;
 import com.aichat.dto.ChatResponse;
+import com.aichat.dto.ModelInfo;
 import com.aichat.service.AiChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -92,5 +95,17 @@ public class ChatController {
     @GetMapping("/health")
     public ResponseEntity<String> health() {
         return ResponseEntity.ok("OK");
+    }
+    
+    @GetMapping("/models")
+    public Mono<ResponseEntity<List<ModelInfo>>> getModels(@RequestParam(required = false, defaultValue = "gpustack") String provider) {
+        logger.info("Fetching models for provider: {}", provider);
+        return chatService.fetchModels(provider)
+                .map(models -> {
+                    if (models.isEmpty()) {
+                        return ResponseEntity.ok(Collections.emptyList());
+                    }
+                    return ResponseEntity.ok(models);
+                });
     }
 }

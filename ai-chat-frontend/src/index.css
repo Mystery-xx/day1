@@ -54,6 +54,98 @@ body {
   animation: fadeIn 0.3s ease;
 }
 
+.message p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.message p + p {
+  margin-top: 8px;
+}
+
+.message pre {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 8px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.message code {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.message pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.message strong {
+  font-weight: 600;
+}
+
+.message em {
+  font-style: italic;
+}
+
+.message ul,
+.message ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.message li {
+  margin: 4px 0;
+}
+
+.message h1,
+.message h2,
+.message h3,
+.message h4,
+.message h5,
+.message h6 {
+  margin: 12px 0 8px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.message h1 {
+  font-size: 1.5em;
+}
+
+.message h2 {
+  font-size: 1.25em;
+}
+
+.message h3 {
+  font-size: 1.1em;
+}
+
+.message blockquote {
+  border-left: 3px solid #667eea;
+  padding-left: 12px;
+  margin: 8px 0;
+  color: #666;
+  font-style: italic;
+}
+
+.message a {
+  color: #667eea;
+  text-decoration: underline;
+}
+
+.message hr {
+  border: none;
+  border-top: 1px solid #e0e0e0;
+  margin: 12px 0;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -237,94 +329,6 @@ body {
   padding: 20px;
 }
 
-.reservation-panel {
-  width: 350px;
-  min-width: 350px;
-  padding: 20px;
-  background: #fafafa;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.reservation-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 2px solid #667eea;
-}
-
-.reservation-empty {
-  color: #999;
-  text-align: center;
-  padding: 40px 20px;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.reservation-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.reservation-field {
-  padding: 16px;
-  background: white;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
-  transition: all 0.3s ease;
-}
-
-.reservation-field.filled {
-  border-color: #667eea;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
-}
-
-.reservation-field.empty {
-  opacity: 0.7;
-}
-
-.field-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: #666;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-
-.field-value {
-  font-size: 16px;
-  color: #333;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
-.reservation-field.empty .field-value {
-  color: #ccc;
-  font-style: italic;
-}
-
-.reservation-confirm {
-  margin-top: 24px;
-  padding: 16px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-  border-radius: 8px;
-  border: 1px solid #667eea;
-}
-
-.confirm-text {
-  font-size: 14px;
-  color: #667eea;
-  font-weight: 500;
-  line-height: 1.5;
-  text-align: center;
-}
-
 @media (max-width: 1200px) {
   .debug-panel {
     display: none;
@@ -341,11 +345,6 @@ body {
   .chat-section {
     border-right: none;
     border-bottom: 1px solid #e0e0e0;
-  }
-
-  .reservation-panel {
-    width: 100%;
-    border-top: 1px solid #e0e0e0;
   }
 }
 
@@ -446,6 +445,62 @@ body {
 
 .setting-item input[type="text"]:focus {
   border-color: #667eea;
+}
+
+.setting-toggle-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setting-toggle-container label {
+  flex: 1;
+  cursor: pointer;
+  margin: 0;
+}
+
+.toggle-switch {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 50px;
+  height: 28px;
+  border-radius: 14px;
+  background: #ccc;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.3s;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.toggle-switch::before {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.3s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch:checked {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.toggle-switch:checked::before {
+  transform: translateX(22px);
+}
+
+.toggle-switch:hover {
+  background: #bbb;
+}
+
+.toggle-switch:checked:hover {
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
 }
 
 @media (max-width: 1200px) {

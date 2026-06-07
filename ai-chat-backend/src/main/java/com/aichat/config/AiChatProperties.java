@@ -8,8 +8,12 @@ import java.util.List;
 @Configuration
 @ConfigurationProperties(prefix = "ai.api")
 public class AiChatProperties {
+    private String provider;
     private String key;
     private String url;
+    private String gpustackUrl;
+    private String huggingfaceUrl;
+    private String huggingfaceToken;
     private String model;
     private Double temperature = 1.0;
     private Integer maxTokens = null;
@@ -17,6 +21,14 @@ public class AiChatProperties {
     private Double frequencyPenalty = 0.0;
     private Double presencePenalty = 0.0;
     private List<String> stop;
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = provider;
+    }
 
     public String getKey() {
         return key;
@@ -32,6 +44,38 @@ public class AiChatProperties {
 
     public void setUrl(String url) {
         this.url = url;
+    }
+
+    public String getGpustackUrl() {
+        return gpustackUrl;
+    }
+
+    public void setGpustackUrl(String gpustackUrl) {
+        this.gpustackUrl = gpustackUrl;
+    }
+
+    public String getHuggingfaceUrl() {
+        return huggingfaceUrl;
+    }
+
+    public void setHuggingfaceUrl(String huggingfaceUrl) {
+        this.huggingfaceUrl = huggingfaceUrl;
+    }
+
+    public String getHuggingfaceToken() {
+        return huggingfaceToken;
+    }
+
+    public void setHuggingfaceToken(String huggingfaceToken) {
+        this.huggingfaceToken = huggingfaceToken;
+    }
+
+    public String getProviderBaseUrl() {
+        if ("huggingface".equalsIgnoreCase(provider)) {
+            return huggingfaceUrl != null ? huggingfaceUrl : url;
+        } else {
+            return gpustackUrl != null ? gpustackUrl : url;
+        }
     }
 
     public String getModel() {

@@ -60,12 +60,31 @@ public class ChatRequest {
     }
 
     public static class ModelSettings {
+        private String provider;
+        private String model;
         private Double temperature;
         private Integer maxTokens;
         private Double topP;
         private Double frequencyPenalty;
         private Double presencePenalty;
         private List<String> stop;
+        private Boolean sendHistory;
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model;
+        }
 
         public Double getTemperature() {
             return temperature;
@@ -113,6 +132,14 @@ public class ChatRequest {
 
         public void setStop(List<String> stop) {
             this.stop = stop;
+        }
+
+        public Boolean getSendHistory() {
+            return sendHistory;
+        }
+
+        public void setSendHistory(Boolean sendHistory) {
+            this.sendHistory = sendHistory;
         }
     }
 }

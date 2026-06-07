@@ -10,6 +10,8 @@ function App() {
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
   const [settings, setSettings] = useState({
+    provider: 'gpustack',
+    model: '',
     temperature: 1.0,
     maxTokens: 16384,
     topP: 1.0,
@@ -18,6 +20,7 @@ function App() {
     stop: [],
     sendHistory: true
   })
+  const [models, setModels] = useState([])
 
   const messagesEndRef = useRef(null)
 
@@ -28,6 +31,31 @@ function App() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    let cancelled = false
+    const provider = settings.provider
+
+    // Reset model immediately when provider changes
+    setSettings(prev => ({ ...prev, model: '' }))
+    setModels([])
+
+    const loadModels = async () => {
+      try {
+        const response = await fetch(`/api/chat/models?provider=${provider}`)
+        if (response.ok && !cancelled) {
+          const data = await response.json()
+          setModels(data)
+        }
+      } catch (error) {
+        console.error('Error fetching models:', error)
+        if (!cancelled) setModels([])
+      }
+    }
+
+    loadModels()
+    return () => { cancelled = true }
+  }, [settings.provider])
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -110,9 +138,13 @@ function App() {
     }
   }
 
+  const handleRefreshModels = () => {
+    fetchModels(settings.provider)
+  }
+
   return (
     <div className="app-container">
-      <SettingsPanel settings={settings} onSettingsChange={setSettings} />
+      <SettingsPanel settings={settings} onSettingsChange={setSettings} models={models} onRefreshModels={handleRefreshModels} />
       <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} />
       <div className="chat-section">
         <div className="chat-header">

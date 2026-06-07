@@ -3,7 +3,7 @@ package com.aichat.service;
 import com.aichat.config.AiChatProperties;
 import com.aichat.dto.ChatRequest;
 import com.aichat.dto.ChatResponse;
-import com.aichat.dto.Reservation;
+import com.aichat.dto.ModelInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -12,6 +12,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
@@ -24,6 +25,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 @Service
 public class AiChatService {
@@ -34,39 +36,6 @@ public class AiChatService {
     private final AiChatProperties properties;
     private final ObjectMapper objectMapper;
 
-    private static final String SYSTEM_PROMPT_TEMPLATE = """
-            Ты помощник для бронирования столиков в ресторане.
-            Твоя задача - извлекать из диалога данные для заказа:
-            - restaurantAddress: адрес ресторана
-            - date: дата в формате YYYY-MM-DD
-            - time: время в формате HH:MM
-            - numberOfGuests: количество гостей (число)
-
-            После каждого ответа пользователя анализируй историю диалога и обновляй данные заказа.
-            Если пользователь изменил информацию (например, сначала сказал "4 гостя", потом "нет, 5 гостей"),
-            используй последнее значение.
-
-            Если все 4 поля заполнены, спроси пользователя: "Подтвердите заказ: [адрес], [дата] в [время] на [кол-во] гостей. Верно?"
-            Если пользователь подтверждает, верни финальное сообщение об успешном бронировании.
-
-            ТЕКУЩАЯ ДАТА И ВРЕМЯ: {currentDateTime}
-            Используй эту информацию для понимания относительных дат (например, "завтра", "на следующей неделе").
-
-            Возвращай ответ в формате JSON. СТРОГО СОБЛЮДАЙ ПОРЯДОК ПОЛЕЙ:
-            {
-              "reservation": {
-                "restaurantAddress": "...",
-                "date": "...",
-                "time": "...",
-                "numberOfGuests": ...
-              },
-              "content": "твой текстовый ответ пользователю"
-            }
-            
-            ВАЖНО: Поле "reservation" должно идти ПЕРЕД полем "content".
-            Если данных недостаточно, reservation может быть null или содержать только заполненные поля.
-            """;
-
     public AiChatService(AiChatProperties properties) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
@@ -75,7 +44,7 @@ public class AiChatService {
                 .responseTimeout(Duration.ofSeconds(120));
         
         this.webClient = WebClient.builder()
-                .baseUrl(properties.getUrl())
+                .baseUrl(properties.getProviderBaseUrl())
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
@@ -87,11 +56,24 @@ public class AiChatService {
         Map<String, Object> requestBody = buildRequestBody(request);
 
         logger.debug("AI API Request body: {}", requestBody);
+        
+        String provider = request.getSettings() != null ? request.getSettings().getProvider() : properties.getProvider();
+        String baseUrl = getBaseUrlForProvider(provider);
+        String apiKey = getApiKeyForProvider(provider);
+        
+        logger.info("SEND MESSAGE - Provider: {}, Base URL: {}, API Key: {}", provider, baseUrl, maskApiKey(apiKey));
+        logger.info("Request body: {}", requestBody);
 
-        return webClient.post()
+        WebClient requestWebClient = WebClient.builder()
+                .baseUrl(baseUrl)
+                .clientConnector(new ReactorClientHttpConnector(HttpClient.create()))
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+
+        return requestWebClient.post()
                 .uri("/chat/completions")
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getKey())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(Map.class)
@@ -104,10 +86,7 @@ public class AiChatService {
                             Map<String, String> message = (Map<String, String>) firstChoice.get("message");
                             if (message != null) {
                                 String content = message.get("content");
-                                Reservation reservation = parseReservation(content);
-                                String cleanContent = extractContentFromJson(content);
-                                
-                                ChatResponse chatResponse = ChatResponse.successWithReservation(cleanContent, reservation);
+                                ChatResponse chatResponse = ChatResponse.success(content);
                                 chatResponse.setDebugRequest(requestBody);
                                 chatResponse.setDebugResponse(response);
                                 return chatResponse;
@@ -126,7 +105,12 @@ public class AiChatService {
                     }
                 })
                 .onErrorResume(e -> {
-                    logger.error("Error calling AI API", e);
+                    if (e instanceof WebClientResponseException) {
+                        WebClientResponseException wcre = (WebClientResponseException) e;
+                        logger.error("HTTP {} - Response body: {}", wcre.getStatusCode(), wcre.getResponseBodyAsString());
+                    } else {
+                        logger.error("Error calling AI API", e);
+                    }
                     ChatResponse errorResponse = ChatResponse.error("Error calling AI: " + e.getMessage());
                     errorResponse.setDebugRequest(requestBody);
                     errorResponse.setDebugResponse(Map.of("error", e.getMessage()));
@@ -138,19 +122,129 @@ public class AiChatService {
         return buildRequestBody(request);
     }
 
+    public Mono<List<ModelInfo>> fetchModels(String provider) {
+        String baseUrl = getBaseUrlForProvider(provider);
+        String apiKey = getApiKeyForProvider(provider);
+        
+        logger.debug("Fetching models from provider: {}, baseUrl: {}, apiKey: {}", provider, baseUrl, maskApiKey(apiKey));
+        
+        WebClient modelsClient = WebClient.builder()
+                .baseUrl(baseUrl)
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+        
+        return modelsClient.get()
+                .uri("/models")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .flatMap(response -> {
+                    try {
+                        List<ModelInfo> models = new ArrayList<>();
+                        Object dataObj = response.get("data");
+                        if (dataObj instanceof List) {
+                            List<?> dataList = (List<?>) dataObj;
+                            for (Object item : dataList) {
+                                if (item instanceof Map) {
+                                    Map<String, Object> modelData = (Map<String, Object>) item;
+                                    ModelInfo model = new ModelInfo();
+                                    model.setId((String) modelData.get("id"));
+                                    model.setObject((String) modelData.get("object"));
+                                    Object created = modelData.get("created");
+                                    if (created instanceof Number) {
+                                        model.setCreated(((Number) created).longValue());
+                                    }
+                                    model.setOwnedBy((String) modelData.get("owned_by"));
+                                    model.setCategory(categorizeModel(model.getId()));
+                                    models.add(model);
+                                }
+                            }
+                        }
+                        logger.debug("Found {} models from {}", models.size(), provider);
+                        return Mono.just(models);
+                    } catch (Exception e) {
+                        logger.error("Error parsing models response from {}", provider, e);
+                        return Mono.just(Collections.<ModelInfo>emptyList());
+                    }
+                })
+                .onErrorResume(e -> {
+                    logger.error("Error fetching models from {}", provider, e);
+                    return Mono.just(Collections.<ModelInfo>emptyList());
+                });
+    }
+    
+    private String getBaseUrlForProvider(String provider) {
+        if ("huggingface".equalsIgnoreCase(provider)) {
+            return properties.getHuggingfaceUrl() != null ? properties.getHuggingfaceUrl() : properties.getUrl();
+        } else {
+            return properties.getGpustackUrl() != null ? properties.getGpustackUrl() : properties.getUrl();
+        }
+    }
+    
+    private String getApiKeyForProvider(String provider) {
+        if ("huggingface".equalsIgnoreCase(provider)) {
+            String hfToken = properties.getHuggingfaceToken();
+            return hfToken != null && !hfToken.isEmpty() ? hfToken : properties.getKey();
+        } else {
+            return properties.getKey();
+        }
+    }
+    
+    private String maskApiKey(String apiKey) {
+        if (apiKey == null || apiKey.length() <= 8) {
+            return "***";
+        }
+        return apiKey.substring(0, 4) + "..." + apiKey.substring(apiKey.length() - 4);
+    }
+
+    /**
+     * Categorize models by capability based on model name patterns.
+     * Categories: "weak" (small/fast), "medium" (balanced), "strong" (large/capable), "super" (300B+)
+     */
+    private String categorizeModel(String modelId) {
+        if (modelId == null) {
+            return "medium";
+        }
+        
+        String id = modelId.toLowerCase();
+        
+        // Super strong models - 300B+ parameters, maximum capability
+        if (id.contains("397b") || id.contains("qwen3.5-397b") ||
+            id.contains("235b") || id.contains("qwen3-235b")) {
+            return "super";
+        }
+        
+        // Strong models - 70B-100B parameters, high capability
+        if (id.contains("qwen2.5-72b") || id.contains("qwen2.5-70b") || 
+            id.contains("72b") || id.contains("70b") ||
+            id.contains("llama-3-70b") || id.contains("llama-3.1-70b") ||
+            id.contains("mixtral-8x7b") || id.contains("mixtral-8x22b")) {
+            return "strong";
+        }
+        
+        // Weak models - small, fast, limited capability
+        if (id.contains("qwen2.5-0.5b") || id.contains("qwen2.5-1.5b") || 
+            id.contains("qwen2.5-1b") || id.contains("qwen2.5-3b") ||
+            id.contains("0.5b") || id.contains("1b") || id.contains("1.5b") || id.contains("3b") ||
+            id.contains("llama-3-8b") || id.contains("llama-3.1-8b") ||
+            id.contains("gemma-2b") || id.contains("gemma-7b") ||
+            id.contains("phi-2") || id.contains("phi-3-mini")) {
+            return "weak";
+        }
+        
+        // Medium models - everything else (13b-32b range typically)
+        if (id.contains("13b") || id.contains("14b") || id.contains("16b") || 
+            id.contains("20b") || id.contains("24b") || id.contains("32b") ||
+            id.contains("qwen2.5-14b") || id.contains("qwen2.5-32b")) {
+            return "medium";
+        }
+        
+        // Default to medium for unknown models
+        return "medium";
+    }
+
     private Map<String, Object> buildRequestBody(ChatRequest request) {
         List<Map<String, String>> messages = new ArrayList<>();
-
-        // Get current datetime in GMT+3 (Europe/Moscow timezone)
-        String currentDateTime = LocalDateTime.now(ZoneId.of("Europe/Moscow"))
-                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        
-        String systemPrompt = SYSTEM_PROMPT_TEMPLATE.replace("{currentDateTime}", currentDateTime);
-
-        Map<String, String> systemMessage = new HashMap<>();
-        systemMessage.put("role", "system");
-        systemMessage.put("content", systemPrompt);
-        messages.add(systemMessage);
 
         if (request.getHistory() != null) {
             for (ChatRequest.Message msg : request.getHistory()) {
@@ -167,12 +261,18 @@ public class AiChatService {
         messages.add(userMessage);
 
         Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", properties.getModel());
+        
+        // Use model from request settings, fall back to properties
+        ChatRequest.ModelSettings requestSettings = request.getSettings();
+        String model = (requestSettings != null && requestSettings.getModel() != null) 
+            ? requestSettings.getModel() 
+            : properties.getModel();
+        requestBody.put("model", model);
+        
         requestBody.put("messages", messages);
         requestBody.put("stream", false);
         
         // Use request settings if provided, otherwise fall back to properties
-        ChatRequest.ModelSettings requestSettings = request.getSettings();
         
         if (requestSettings != null) {
             if (requestSettings.getTemperature() != null) {
@@ -182,7 +282,11 @@ public class AiChatService {
             }
             
             if (requestSettings.getMaxTokens() != null) {
-                requestBody.put("max_tokens", requestSettings.getMaxTokens());
+                // Only send max_tokens if it's not the default maximum value (16384)
+                // This allows APIs to use their own defaults when not explicitly needed
+                if (requestSettings.getMaxTokens() != 16384) {
+                    requestBody.put("max_tokens", requestSettings.getMaxTokens());
+                }
             } else if (properties.getMaxTokens() != null) {
                 requestBody.put("max_tokens", properties.getMaxTokens());
             }
@@ -234,46 +338,4 @@ public class AiChatService {
         return requestBody;
     }
 
-    private Reservation parseReservation(String content) {
-        try {
-            JsonNode rootNode = objectMapper.readTree(content);
-            JsonNode reservationNode = rootNode.get("reservation");
-            
-            if (reservationNode == null || reservationNode.isNull()) {
-                return null;
-            }
-
-            Reservation reservation = new Reservation();
-            
-            if (reservationNode.has("restaurantAddress")) {
-                reservation.setRestaurantAddress(reservationNode.get("restaurantAddress").asText());
-            }
-            if (reservationNode.has("date")) {
-                reservation.setDate(reservationNode.get("date").asText());
-            }
-            if (reservationNode.has("time")) {
-                reservation.setTime(reservationNode.get("time").asText());
-            }
-            if (reservationNode.has("numberOfGuests")) {
-                reservation.setNumberOfGuests(reservationNode.get("numberOfGuests").asInt());
-            }
-
-            return reservation;
-        } catch (Exception e) {
-            logger.debug("Failed to parse reservation from response: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private String extractContentFromJson(String content) {
-        try {
-            JsonNode rootNode = objectMapper.readTree(content);
-            if (rootNode.has("content")) {
-                return rootNode.get("content").asText();
-            }
-            return content;
-        } catch (Exception e) {
-            return content;
-        }
-    }
 }

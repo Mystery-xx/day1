@@ -1,4 +1,4 @@
-function SettingsPanel({ settings, onSettingsChange }) {
+function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels }) {
   const handleChange = (key, value) => {
     onSettingsChange({
       ...settings,
@@ -18,6 +18,74 @@ function SettingsPanel({ settings, onSettingsChange }) {
       </div>
 
       <div className="settings-content">
+        <div className="setting-item">
+          <label htmlFor="provider">AI Provider</label>
+          <select
+            id="provider"
+            value={settings.provider || 'gpustack'}
+            onChange={(e) => handleChange('provider', e.target.value)}
+            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+          >
+            <option value="gpustack">GPUStack</option>
+            <option value="huggingface">HuggingFace</option>
+          </select>
+          <div className="setting-description">Выберите провайдера для доступа к ИИ модели</div>
+        </div>
+        <div className="setting-item">
+          <div className="setting-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <label htmlFor="model" style={{ marginBottom: 0 }}>Model</label>
+            <button 
+              onClick={onRefreshModels}
+              style={{ padding: '4px 8px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#f5f5f5' }}
+              title="Refresh models list"
+            >
+              ↻ Refresh
+            </button>
+          </div>
+          <select
+            id="model"
+            value={settings.model || ''}
+            onChange={(e) => handleChange('model', e.target.value)}
+            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+            disabled={!models || models.length === 0}
+          >
+            {(!models || models.length === 0) ? (
+              <option value="">No models loaded</option>
+            ) : (
+              <>
+                <optgroup label="🔴 Слабые модели (быстрые)">
+                  {models.filter(m => m.category === 'weak').map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.id}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="🟡 Средние модели (сбалансированные)">
+                  {models.filter(m => m.category === 'medium').map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.id}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="🟢 Сильные модели (мощные)">
+                  {models.filter(m => m.category === 'strong').map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.id}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="🟣 Супер-сильные модели (300B+)">
+                  {models.filter(m => m.category === 'super').map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.id}
+                    </option>
+                  ))}
+                </optgroup>
+              </>
+            )}
+          </select>
+          <div className="setting-description">Выберите модель для генерации ответов</div>
+        </div>
         <div className="setting-item">
           <label htmlFor="temperature">Temperature: {settings.temperature}</label>
           <input
@@ -98,6 +166,20 @@ function SettingsPanel({ settings, onSettingsChange }) {
             onChange={(e) => handleStopChange(e.target.value)}
           />
           <div className="setting-description">Последовательности для остановки генерации (через запятую)</div>
+        </div>
+
+        <div className="setting-item">
+          <div className="setting-toggle-container">
+            <label htmlFor="sendHistory">Отправлять историю чата</label>
+            <input
+              id="sendHistory"
+              type="checkbox"
+              className="toggle-switch"
+              checked={settings.sendHistory}
+              onChange={(e) => handleChange('sendHistory', e.target.checked)}
+            />
+          </div>
+          <div className="setting-description">Если отключено, AI получает только текущее сообщение без истории диалога</div>
         </div>
       </div>
     </div>
