@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
+import { useChatHistory } from './hooks/useChatHistory'
 
 function App() {
   const [messages, setMessages] = useState([])
@@ -9,9 +10,10 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
+  const { history: requestHistory, addEntry } = useChatHistory()
   const [settings, setSettings] = useState({
     provider: 'gpustack',
-    model: '',
+    model: 'qwen3.5-397b-a17b',
     temperature: 1.0,
     maxTokens: 16384,
     topP: 1.0,
@@ -36,7 +38,6 @@ function App() {
     let cancelled = false
     const provider = settings.provider
 
-    // Reset model immediately when provider changes
     setSettings(prev => ({ ...prev, model: '' }))
     setModels([])
 
@@ -57,6 +58,8 @@ function App() {
     return () => { cancelled = true }
   }, [settings.provider])
 
+
+
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
 
@@ -70,7 +73,8 @@ function App() {
     try {
       const requestBody = {
         message: userMessage.content,
-        history: settings.sendHistory ? messages.map(m => ({ role: m.role, content: m.content })) : [],
+        // Only send user/assistant messages in history, skip error messages
+        history: settings.sendHistory ? messages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role, content: m.content })) : [],
         settings: settings
       }
 
@@ -111,8 +115,20 @@ function App() {
               setLastResponse(response)
               setIsLoading(false)
               
+              // Save to history if we have usage data
+              if (response.usage) {
+                addEntry({
+                  provider: settings.provider,
+                  model: response.model || settings.model,
+                  promptTokens: response.usage.prompt_tokens || response.usage.promptTokens,
+                  completionTokens: response.usage.completion_tokens || response.usage.completionTokens,
+                  totalTokens: response.usage.total_tokens || response.usage.totalTokens
+                })
+              }
+              
               if (response.error) {
-                setMessages([...newMessages, { role: 'error', content: response.error }])
+                // Don't add error messages to chat history - they cause 400 errors from AI API
+                setMessages(prev => [...prev, { role: 'system', content: `Error: ${response.error}` }])
               } else if (response.content) {
                 setMessages([...newMessages, { role: 'assistant', content: response.content }])
               } else {
@@ -123,9 +139,10 @@ function App() {
         }
       }
     } catch (error) {
-      setMessages([...newMessages, { 
-        role: 'error', 
-        content: 'Network error: ' + error.message 
+      // Don't add error messages to chat history - they cause 400 errors from AI API
+      setMessages(prev => [...prev, { 
+        role: 'system', 
+        content: `Network error: ${error.message}` 
       }])
       setIsLoading(false)
     }
@@ -145,7 +162,7 @@ function App() {
   return (
     <div className="app-container">
       <SettingsPanel settings={settings} onSettingsChange={setSettings} models={models} onRefreshModels={handleRefreshModels} />
-      <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} />
+      <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} requestHistory={requestHistory} />
       <div className="chat-section">
         <div className="chat-header">
           AI Chat

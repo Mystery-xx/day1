@@ -18,9 +18,6 @@ import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -82,11 +79,12 @@ public class AiChatService {
                     try {
                         List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
                         if (choices != null && !choices.isEmpty()) {
-                            Map<String, Object> firstChoice = choices.get(0);
-                            Map<String, String> message = (Map<String, String>) firstChoice.get("message");
+                            Map<String, String> message = (Map<String, String>) choices.get(0).get("message");
                             if (message != null) {
                                 String content = message.get("content");
-                                ChatResponse chatResponse = ChatResponse.success(content);
+                                String model = (String) response.get("model");
+                                Map<String, Object> usage = (Map<String, Object>) response.get("usage");
+                                ChatResponse chatResponse = new ChatResponse(content, null, model, usage);
                                 chatResponse.setDebugRequest(requestBody);
                                 chatResponse.setDebugResponse(response);
                                 return chatResponse;

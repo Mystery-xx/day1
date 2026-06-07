@@ -1,10 +1,13 @@
 package com.aichat.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Map;
 
 public class ChatResponse {
     private String content;
     private String error;
+    private String model;
+    private Map<String, Object> usage;
     
     @JsonProperty("debugRequest")
     private Object debugRequest;
@@ -17,6 +20,13 @@ public class ChatResponse {
     public ChatResponse(String content, String error) {
         this.content = content;
         this.error = error;
+    }
+
+    public ChatResponse(String content, String error, String model, Map<String, Object> usage) {
+        this.content = content;
+        this.error = error;
+        this.model = model;
+        this.usage = usage;
     }
 
     public static ChatResponse success(String content) {
@@ -41,6 +51,22 @@ public class ChatResponse {
 
     public void setError(String error) {
         this.error = error;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public Map<String, Object> getUsage() {
+        return usage;
+    }
+
+    public void setUsage(Map<String, Object> usage) {
+        this.usage = usage;
     }
 
     public Object getDebugRequest() {
