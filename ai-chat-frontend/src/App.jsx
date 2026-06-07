@@ -78,6 +78,9 @@ function App() {
         settings: settings
       }
 
+      // Track response time
+      const startTime = performance.now()
+
       // Use SSE streaming with POST to get debugRequest immediately
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
@@ -115,6 +118,9 @@ function App() {
               setLastResponse(response)
               setIsLoading(false)
               
+              // Calculate response time in milliseconds
+              const responseTime = Math.round(performance.now() - startTime)
+              
               // Save to history if we have usage data
               if (response.usage) {
                 addEntry({
@@ -122,7 +128,8 @@ function App() {
                   model: response.model || settings.model,
                   promptTokens: response.usage.prompt_tokens || response.usage.promptTokens,
                   completionTokens: response.usage.completion_tokens || response.usage.completionTokens,
-                  totalTokens: response.usage.total_tokens || response.usage.totalTokens
+                  totalTokens: response.usage.total_tokens || response.usage.totalTokens,
+                  responseTime: responseTime
                 })
               }
               

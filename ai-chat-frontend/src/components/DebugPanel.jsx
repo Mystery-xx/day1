@@ -16,6 +16,7 @@ function DebugPanel({ lastRequest, lastResponse, requestHistory }) {
                   <th>Prompt Tokens</th>
                   <th>Completion Tokens</th>
                   <th>Total Tokens</th>
+                  <th>Response Time</th>
                 </tr>
               </thead>
               <tbody>
@@ -26,6 +27,7 @@ function DebugPanel({ lastRequest, lastResponse, requestHistory }) {
                     <td>{entry.promptTokens ?? '-'}</td>
                     <td>{entry.completionTokens ?? '-'}</td>
                     <td>{entry.totalTokens ?? '-'}</td>
+                    <td>{entry.responseTime != null ? `${entry.responseTime} ms` : '-'}</td>
                   </tr>
                 ))}
               </tbody>
