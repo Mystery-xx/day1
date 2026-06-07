@@ -12,8 +12,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import reactor.core.publisher.Mono;
+import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -62,23 +63,74 @@ public class AiChatService {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         
+        HttpClient httpClient = HttpClient.create()
+                .responseTimeout(Duration.ofSeconds(120));
+        
         this.webClient = WebClient.builder()
                 .baseUrl(properties.getUrl())
-                .filter(timeoutFilter())
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
-    }
-    
-    private ExchangeFilterFunction timeoutFilter() {
-        return ExchangeFilterFunction.ofRequestProcessor(clientRequest -> 
-            Mono.just(clientRequest)
-                .timeout(Duration.ofSeconds(120))
-        );
     }
 
     public Mono<ChatResponse> sendMessage(ChatRequest request) {
         logger.debug("Sending message to AI: {}", request.getMessage());
 
+        Map<String, Object> requestBody = buildRequestBody(request);
+
+        logger.debug("AI API Request body: {}", requestBody);
+
+        return webClient.post()
+                .uri("/chat/completions")
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getKey())
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .map(response -> {
+                    logger.debug("Received response from AI: {}", response);
+                    try {
+                        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
+                        if (choices != null && !choices.isEmpty()) {
+                            Map<String, Object> firstChoice = choices.get(0);
+                            Map<String, String> message = (Map<String, String>) firstChoice.get("message");
+                            if (message != null) {
+                                String content = message.get("content");
+                                Reservation reservation = parseReservation(content);
+                                String cleanContent = extractContentFromJson(content);
+                                
+                                ChatResponse chatResponse = ChatResponse.successWithReservation(cleanContent, reservation);
+                                chatResponse.setDebugRequest(requestBody);
+                                chatResponse.setDebugResponse(response);
+                                return chatResponse;
+                            }
+                        }
+                        ChatResponse errorResponse = ChatResponse.error("Empty response from AI");
+                        errorResponse.setDebugRequest(requestBody);
+                        errorResponse.setDebugResponse(response);
+                        return errorResponse;
+                    } catch (Exception e) {
+                        logger.error("Error parsing AI response", e);
+                        ChatResponse errorResponse = ChatResponse.error("Error parsing response: " + e.getMessage());
+                        errorResponse.setDebugRequest(requestBody);
+                        errorResponse.setDebugResponse(response);
+                        return errorResponse;
+                    }
+                })
+                .onErrorResume(e -> {
+                    logger.error("Error calling AI API", e);
+                    ChatResponse errorResponse = ChatResponse.error("Error calling AI: " + e.getMessage());
+                    errorResponse.setDebugRequest(requestBody);
+                    errorResponse.setDebugResponse(Map.of("error", e.getMessage()));
+                    return Mono.just(errorResponse);
+                });
+    }
+
+    public Map<String, Object> buildDebugRequest(ChatRequest request) {
+        return buildRequestBody(request);
+    }
+
+    private Map<String, Object> buildRequestBody(ChatRequest request) {
         List<Map<String, String>> messages = new ArrayList<>();
 
         Map<String, String> systemMessage = new HashMap<>();
@@ -105,37 +157,7 @@ public class AiChatService {
         requestBody.put("messages", messages);
         requestBody.put("stream", false);
 
-        return webClient.post()
-                .uri("/chat/completions")
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getKey())
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .map(response -> {
-                    logger.debug("Received response from AI: {}", response);
-                    try {
-                        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-                        if (choices != null && !choices.isEmpty()) {
-                            Map<String, Object> firstChoice = choices.get(0);
-                            Map<String, String> message = (Map<String, String>) firstChoice.get("message");
-                            if (message != null) {
-                                String content = message.get("content");
-                                Reservation reservation = parseReservation(content);
-                                String cleanContent = extractContentFromJson(content);
-                                return ChatResponse.successWithReservation(cleanContent, reservation);
-                            }
-                        }
-                        return ChatResponse.error("Empty response from AI");
-                    } catch (Exception e) {
-                        logger.error("Error parsing AI response", e);
-                        return ChatResponse.error("Error parsing response: " + e.getMessage());
-                    }
-                })
-                .onErrorResume(e -> {
-                    logger.error("Error calling AI API", e);
-                    return Mono.just(ChatResponse.error("Error calling AI: " + e.getMessage()));
-                });
+        return requestBody;
     }
 
     private Reservation parseReservation(String content) {

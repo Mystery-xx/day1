@@ -1,9 +1,17 @@
 package com.aichat.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class ChatResponse {
     private String content;
     private String error;
     private Reservation reservation;
+    
+    @JsonProperty("debugRequest")
+    private Object debugRequest;
+    
+    @JsonProperty("debugResponse")
+    private Object debugResponse;
 
     public ChatResponse() {}
 
@@ -52,5 +60,21 @@ public class ChatResponse {
 
     public void setReservation(Reservation reservation) {
         this.reservation = reservation;
+    }
+
+    public Object getDebugRequest() {
+        return debugRequest;
+    }
+
+    public void setDebugRequest(Object debugRequest) {
+        this.debugRequest = debugRequest;
+    }
+
+    public Object getDebugResponse() {
+        return debugResponse;
+    }
+
+    public void setDebugResponse(Object debugResponse) {
+        this.debugResponse = debugResponse;
     }
 }

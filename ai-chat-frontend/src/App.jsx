@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import ReservationPanel from './components/ReservationPanel'
+import DebugPanel from './components/DebugPanel'
 
 function App() {
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [reservation, setReservation] = useState(null)
+  const [lastRequest, setLastRequest] = useState(null)
+  const [lastResponse, setLastResponse] = useState(null)
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -18,25 +21,56 @@ function App() {
     setIsLoading(true)
 
     try {
-      const response = await fetch('/api/chat', {
+      const requestBody = {
+        message: userMessage.content,
+        history: messages.map(m => ({ role: m.role, content: m.content }))
+      }
+
+      // Use SSE streaming with POST to get debugRequest immediately
+      const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          message: userMessage.content,
-          history: messages.map(m => ({ role: m.role, content: m.content }))
-        })
+        body: JSON.stringify(requestBody)
       })
 
-      const data = await response.json()
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
 
-      if (data.error) {
-        setMessages([...newMessages, { role: 'error', content: data.error }])
-      } else {
-        setMessages([...newMessages, { role: 'assistant', content: data.content }])
-        if (data.reservation) {
-          setReservation(data.reservation)
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data:')) {
+            const data = JSON.parse(line.slice(5))
+            console.log('SSE event:', data.type, data)
+            
+            if (data.type === 'debugRequest') {
+              console.log('Setting debugRequest immediately:', data.data)
+              setLastRequest(data.data)
+              setLastResponse({ debugRequest: data.data })
+            } else if (data.type === 'response') {
+              const response = data.data
+              setLastResponse(response)
+              setIsLoading(false)
+              
+              if (response.error) {
+                setMessages([...newMessages, { role: 'error', content: response.error }])
+              } else {
+                setMessages([...newMessages, { role: 'assistant', content: response.content }])
+                if (response.reservation) {
+                  setReservation(response.reservation)
+                }
+              }
+            }
+          }
         }
       }
     } catch (error) {
@@ -44,7 +78,6 @@ function App() {
         role: 'error', 
         content: 'Network error: ' + error.message 
       }])
-    } finally {
       setIsLoading(false)
     }
   }
@@ -58,6 +91,7 @@ function App() {
 
   return (
     <div className="app-container">
+      <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} />
       <div className="chat-section">
         <div className="chat-header">
           AI Chat

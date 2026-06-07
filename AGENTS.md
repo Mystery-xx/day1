@@ -72,3 +72,30 @@ Browser (:5173) → React → Vite proxy /api → Spring Boot (:8080) → AI API
 - Backend: Multi-stage Docker (Maven build → JRE runtime)
 - Frontend: Multi-stage Docker (Node build → Nginx serving static files)
 - Model: Configured via `AI_MODEL` environment variable
+
+## AI Agent Instructions
+
+**MANDATORY: After ANY code change, rebuild and redeploy Docker containers:**
+
+```bash
+docker-compose up --build
+```
+
+This is required because:
+- The application runs exclusively in Docker containers
+- Local file changes are NOT hot-reloaded into running containers
+- Both frontend and backend must be rebuilt to pick up changes
+
+**DO NOT** consider a task complete without rebuilding containers.
+**DO NOT** expect changes to work without `docker-compose up --build`.
+
+If only one service was modified, you can rebuild selectively:
+```bash
+# Frontend only
+docker-compose build ai-chat-frontend && docker-compose up ai-chat-frontend
+
+# Backend only
+docker-compose build ai-chat-backend && docker-compose up ai-chat-backend
+```
+
+But full rebuild (`docker-compose up --build`) is recommended to ensure consistency.
