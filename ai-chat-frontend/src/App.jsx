@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import ReservationPanel from './components/ReservationPanel'
+import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
 import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
 
@@ -7,7 +7,6 @@ function App() {
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [reservation, setReservation] = useState(null)
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
   const [settings, setSettings] = useState({
@@ -16,8 +15,19 @@ function App() {
     topP: 1.0,
     frequencyPenalty: 0.0,
     presencePenalty: 0.0,
-    stop: []
+    stop: [],
+    sendHistory: true
   })
+
+  const messagesEndRef = useRef(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -32,7 +42,7 @@ function App() {
     try {
       const requestBody = {
         message: userMessage.content,
-        history: messages.map(m => ({ role: m.role, content: m.content })),
+        history: settings.sendHistory ? messages.map(m => ({ role: m.role, content: m.content })) : [],
         settings: settings
       }
 
@@ -77,9 +87,6 @@ function App() {
                 setMessages([...newMessages, { role: 'error', content: response.error }])
               } else if (response.content) {
                 setMessages([...newMessages, { role: 'assistant', content: response.content }])
-                if (response.reservation) {
-                  setReservation(response.reservation)
-                }
               } else {
                 console.warn('No content in response:', response)
               }
@@ -115,7 +122,7 @@ function App() {
         <div className="chat-messages">
           {messages.length === 0 ? (
             <div className="empty-state">
-              Начните чат для бронирования столика
+              Начните чат
             </div>
           ) : (
             messages.map((message, index) => (
@@ -123,7 +130,7 @@ function App() {
                 key={index} 
                 className={`message ${message.role}`}
               >
-                {message.content}
+                <ReactMarkdown>{message.content}</ReactMarkdown>
               </div>
             ))
           )}
@@ -132,6 +139,7 @@ function App() {
               <span className="loading"></span>
             </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         <div className="chat-input-container">
@@ -153,8 +161,6 @@ function App() {
           </button>
         </div>
       </div>
-
-      <ReservationPanel reservation={reservation} />
     </div>
   )
 }
