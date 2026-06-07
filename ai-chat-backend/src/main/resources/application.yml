@@ -15,6 +15,12 @@ ai:
     key: ${AI_API_KEY}
     url: ${AI_API_URL}
     model: ${AI_MODEL}
+    temperature: ${AI_TEMPERATURE:0.7}
+    max-tokens: ${AI_MAX_TOKENS:1024}
+    top-p: ${AI_TOP_P:1.0}
+    frequency-penalty: ${AI_FREQUENCY_PENALTY:0.0}
+    presence-penalty: ${AI_PRESENCE_PENALTY:0.0}
+    stop: ${AI_STOP:}
 
 logging:
   level:

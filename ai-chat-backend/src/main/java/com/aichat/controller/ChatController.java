@@ -15,6 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.HashMap;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -55,7 +56,7 @@ public class ChatController {
                 Map<String, Object> debugRequest = chatService.buildDebugRequest(request);
                 logger.debug("Emitting debug request immediately: {}", debugRequest);
                 String debugRequestJson = mapper.writeValueAsString(Map.of("type", "debugRequest", "data", debugRequest));
-                emitter.next("data:" + debugRequestJson + "\n\n");
+                emitter.next(debugRequestJson);
                 
                 // Then call AI API and emit response when ready
                 chatService.sendMessage(request)
@@ -63,8 +64,9 @@ public class ChatController {
                         response -> {
                             try {
                                 logger.debug("Emitting response: {}", response);
+                                // Send full ChatResponse with debug fields included
                                 String responseJson = mapper.writeValueAsString(Map.of("type", "response", "data", response));
-                                emitter.next("data:" + responseJson + "\n\n");
+                                emitter.next(responseJson);
                                 emitter.complete();
                             } catch (JsonProcessingException e) {
                                 emitter.error(e);
@@ -74,7 +76,7 @@ public class ChatController {
                             try {
                                 logger.error("Error in streaming call", error);
                                 String errorJson = mapper.writeValueAsString(Map.of("type", "error", "data", Map.of("error", error.getMessage())));
-                                emitter.next("data:" + errorJson + "\n\n");
+                                emitter.next(errorJson);
                                 emitter.complete();
                             } catch (JsonProcessingException ex) {
                                 emitter.error(ex);

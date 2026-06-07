@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ReservationPanel from './components/ReservationPanel'
 import DebugPanel from './components/DebugPanel'
+import SettingsPanel from './components/SettingsPanel'
 
 function App() {
   const [messages, setMessages] = useState([])
@@ -9,6 +10,14 @@ function App() {
   const [reservation, setReservation] = useState(null)
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
+  const [settings, setSettings] = useState({
+    temperature: 1.0,
+    maxTokens: 16384,
+    topP: 1.0,
+    frequencyPenalty: 0.0,
+    presencePenalty: 0.0,
+    stop: []
+  })
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -23,7 +32,8 @@ function App() {
     try {
       const requestBody = {
         message: userMessage.content,
-        history: messages.map(m => ({ role: m.role, content: m.content }))
+        history: messages.map(m => ({ role: m.role, content: m.content })),
+        settings: settings
       }
 
       // Use SSE streaming with POST to get debugRequest immediately
@@ -58,16 +68,20 @@ function App() {
               setLastResponse({ debugRequest: data.data })
             } else if (data.type === 'response') {
               const response = data.data
+              console.log('Full response:', response)
+              console.log('response.content:', response.content)
               setLastResponse(response)
               setIsLoading(false)
               
               if (response.error) {
                 setMessages([...newMessages, { role: 'error', content: response.error }])
-              } else {
+              } else if (response.content) {
                 setMessages([...newMessages, { role: 'assistant', content: response.content }])
                 if (response.reservation) {
                   setReservation(response.reservation)
                 }
+              } else {
+                console.warn('No content in response:', response)
               }
             }
           }
@@ -91,6 +105,7 @@ function App() {
 
   return (
     <div className="app-container">
+      <SettingsPanel settings={settings} onSettingsChange={setSettings} />
       <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} />
       <div className="chat-section">
         <div className="chat-header">

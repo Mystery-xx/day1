@@ -5,6 +5,7 @@ import java.util.List;
 public class ChatRequest {
     private String message;
     private List<Message> history;
+    private ModelSettings settings;
 
     public static class Message {
         private String role;
@@ -48,5 +49,70 @@ public class ChatRequest {
 
     public void setHistory(List<Message> history) {
         this.history = history;
+    }
+
+    public ModelSettings getSettings() {
+        return settings;
+    }
+
+    public void setSettings(ModelSettings settings) {
+        this.settings = settings;
+    }
+
+    public static class ModelSettings {
+        private Double temperature;
+        private Integer maxTokens;
+        private Double topP;
+        private Double frequencyPenalty;
+        private Double presencePenalty;
+        private List<String> stop;
+
+        public Double getTemperature() {
+            return temperature;
+        }
+
+        public void setTemperature(Double temperature) {
+            this.temperature = temperature;
+        }
+
+        public Integer getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(Integer maxTokens) {
+            this.maxTokens = maxTokens;
+        }
+
+        public Double getTopP() {
+            return topP;
+        }
+
+        public void setTopP(Double topP) {
+            this.topP = topP;
+        }
+
+        public Double getFrequencyPenalty() {
+            return frequencyPenalty;
+        }
+
+        public void setFrequencyPenalty(Double frequencyPenalty) {
+            this.frequencyPenalty = frequencyPenalty;
+        }
+
+        public Double getPresencePenalty() {
+            return presencePenalty;
+        }
+
+        public void setPresencePenalty(Double presencePenalty) {
+            this.presencePenalty = presencePenalty;
+        }
+
+        public List<String> getStop() {
+            return stop;
+        }
+
+        public void setStop(List<String> stop) {
+            this.stop = stop;
+        }
     }
 }

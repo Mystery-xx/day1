@@ -17,6 +17,9 @@ import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -31,7 +34,7 @@ public class AiChatService {
     private final AiChatProperties properties;
     private final ObjectMapper objectMapper;
 
-    private static final String SYSTEM_PROMPT = """
+    private static final String SYSTEM_PROMPT_TEMPLATE = """
             Ты помощник для бронирования столиков в ресторане.
             Твоя задача - извлекать из диалога данные для заказа:
             - restaurantAddress: адрес ресторана
@@ -46,16 +49,21 @@ public class AiChatService {
             Если все 4 поля заполнены, спроси пользователя: "Подтвердите заказ: [адрес], [дата] в [время] на [кол-во] гостей. Верно?"
             Если пользователь подтверждает, верни финальное сообщение об успешном бронировании.
 
-            Возвращай ответ в формате JSON:
+            ТЕКУЩАЯ ДАТА И ВРЕМЯ: {currentDateTime}
+            Используй эту информацию для понимания относительных дат (например, "завтра", "на следующей неделе").
+
+            Возвращай ответ в формате JSON. СТРОГО СОБЛЮДАЙ ПОРЯДОК ПОЛЕЙ:
             {
-              "content": "твой текстовый ответ пользователю",
               "reservation": {
                 "restaurantAddress": "...",
                 "date": "...",
                 "time": "...",
                 "numberOfGuests": ...
-              }
+              },
+              "content": "твой текстовый ответ пользователю"
             }
+            
+            ВАЖНО: Поле "reservation" должно идти ПЕРЕД полем "content".
             Если данных недостаточно, reservation может быть null или содержать только заполненные поля.
             """;
 
@@ -133,9 +141,15 @@ public class AiChatService {
     private Map<String, Object> buildRequestBody(ChatRequest request) {
         List<Map<String, String>> messages = new ArrayList<>();
 
+        // Get current datetime in GMT+3 (Europe/Moscow timezone)
+        String currentDateTime = LocalDateTime.now(ZoneId.of("Europe/Moscow"))
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        
+        String systemPrompt = SYSTEM_PROMPT_TEMPLATE.replace("{currentDateTime}", currentDateTime);
+
         Map<String, String> systemMessage = new HashMap<>();
         systemMessage.put("role", "system");
-        systemMessage.put("content", SYSTEM_PROMPT);
+        systemMessage.put("content", systemPrompt);
         messages.add(systemMessage);
 
         if (request.getHistory() != null) {
@@ -156,6 +170,66 @@ public class AiChatService {
         requestBody.put("model", properties.getModel());
         requestBody.put("messages", messages);
         requestBody.put("stream", false);
+        
+        // Use request settings if provided, otherwise fall back to properties
+        ChatRequest.ModelSettings requestSettings = request.getSettings();
+        
+        if (requestSettings != null) {
+            if (requestSettings.getTemperature() != null) {
+                requestBody.put("temperature", requestSettings.getTemperature());
+            } else if (properties.getTemperature() != null) {
+                requestBody.put("temperature", properties.getTemperature());
+            }
+            
+            if (requestSettings.getMaxTokens() != null) {
+                requestBody.put("max_tokens", requestSettings.getMaxTokens());
+            } else if (properties.getMaxTokens() != null) {
+                requestBody.put("max_tokens", properties.getMaxTokens());
+            }
+            
+            if (requestSettings.getTopP() != null) {
+                requestBody.put("top_p", requestSettings.getTopP());
+            } else if (properties.getTopP() != null) {
+                requestBody.put("top_p", properties.getTopP());
+            }
+            
+            if (requestSettings.getFrequencyPenalty() != null) {
+                requestBody.put("frequency_penalty", requestSettings.getFrequencyPenalty());
+            } else if (properties.getFrequencyPenalty() != null) {
+                requestBody.put("frequency_penalty", properties.getFrequencyPenalty());
+            }
+            
+            if (requestSettings.getPresencePenalty() != null) {
+                requestBody.put("presence_penalty", requestSettings.getPresencePenalty());
+            } else if (properties.getPresencePenalty() != null) {
+                requestBody.put("presence_penalty", properties.getPresencePenalty());
+            }
+            
+            if (requestSettings.getStop() != null && !requestSettings.getStop().isEmpty()) {
+                requestBody.put("stop", requestSettings.getStop());
+            } else if (properties.getStop() != null && !properties.getStop().isEmpty()) {
+                requestBody.put("stop", properties.getStop());
+            }
+        } else {
+            if (properties.getTemperature() != null) {
+                requestBody.put("temperature", properties.getTemperature());
+            }
+            if (properties.getMaxTokens() != null) {
+                requestBody.put("max_tokens", properties.getMaxTokens());
+            }
+            if (properties.getTopP() != null) {
+                requestBody.put("top_p", properties.getTopP());
+            }
+            if (properties.getFrequencyPenalty() != null) {
+                requestBody.put("frequency_penalty", properties.getFrequencyPenalty());
+            }
+            if (properties.getPresencePenalty() != null) {
+                requestBody.put("presence_penalty", properties.getPresencePenalty());
+            }
+            if (properties.getStop() != null && !properties.getStop().isEmpty()) {
+                requestBody.put("stop", properties.getStop());
+            }
+        }
 
         return requestBody;
     }
