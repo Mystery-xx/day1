@@ -3,6 +3,12 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 function DebugPanel({ lastRequest, lastResponse, requestHistory }) {
   const debugRequest = lastResponse?.debugRequest || lastRequest;
   const debugResponse = lastResponse?.debugResponse;
+  const debugSummaryRequest = lastResponse?.debugSummaryRequest;
+  const debugSummaryResponse = lastResponse?.debugSummaryResponse;
+  
+  // Extract summary from debug request (first SYSTEM message if present)
+  const summaryMessage = debugRequest?.messages?.find(msg => msg.role === 'system');
+  const conversationSummary = summaryMessage?.content;
   
   const lastAssistantEntry = requestHistory && requestHistory.length > 0
     ? requestHistory.filter(entry => entry.role === 'assistant').at(-1)
@@ -29,6 +35,15 @@ function DebugPanel({ lastRequest, lastResponse, requestHistory }) {
 
   return (
     <div className="debug-panel">
+      {conversationSummary && (
+        <div className="debug-section">
+          <h3 className="debug-section-title">Conversation Summary</h3>
+          <div className="debug-content">
+            <pre className="debug-json">{conversationSummary}</pre>
+          </div>
+        </div>
+      )}
+
       <div className="debug-section">
         <h3 className="debug-section-title">Token Usage Summary</h3>
         <div className="debug-content">
@@ -106,6 +121,24 @@ function DebugPanel({ lastRequest, lastResponse, requestHistory }) {
           )}
         </div>
       </div>
+
+      {debugSummaryRequest && (
+        <div className="debug-section">
+          <h3 className="debug-section-title">Summary Generation → AI Request</h3>
+          <div className="debug-content">
+            <pre className="debug-json">{JSON.stringify(debugSummaryRequest, null, 2)}</pre>
+          </div>
+        </div>
+      )}
+
+      {debugSummaryResponse && (
+        <div className="debug-section">
+          <h3 className="debug-section-title">Summary Generation ← AI Response</h3>
+          <div className="debug-content">
+            <pre className="debug-json">{JSON.stringify(debugSummaryResponse, null, 2)}</pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

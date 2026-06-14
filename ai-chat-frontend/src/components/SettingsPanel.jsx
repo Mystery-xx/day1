@@ -184,7 +184,7 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
 
         <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
           <label>Управление сессией</label>
-          <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
             <button
               onClick={onNewChat}
               style={{
@@ -201,21 +201,54 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
               + Новый чат
             </button>
             {sessionId && (
-              <button
-                onClick={onClearHistory}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                  borderRadius: '4px',
-                  border: '1px solid #f44336',
-                  background: '#f44336',
-                  color: 'white',
-                  fontWeight: '500'
-                }}
-              >
-                Очистить историю
-              </button>
+              <>
+                <button
+                  onClick={onClearHistory}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    borderRadius: '4px',
+                    border: '1px solid #ff9800',
+                    background: '#ff9800',
+                    color: 'white',
+                    fontWeight: '500'
+                  }}
+                >
+                  Очистить историю
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm('Удалить summary текущей сессии? История сообщений сохранится.')) {
+                      fetch(`/api/chat/sessions/${sessionId}/summary`, { method: 'DELETE' })
+                        .then(response => {
+                          if (response.ok) {
+                            alert('Summary удалён');
+                            window.location.reload();
+                          } else {
+                            alert('Ошибка при удалении summary');
+                          }
+                        })
+                        .catch(error => {
+                          console.error('Error deleting summary:', error);
+                          alert('Ошибка: ' + error.message);
+                        });
+                    }
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    borderRadius: '4px',
+                    border: '1px solid #9c27b0',
+                    background: '#9c27b0',
+                    color: 'white',
+                    fontWeight: '500'
+                  }}
+                >
+                  Удалить summary
+                </button>
+              </>
             )}
           </div>
           {sessionId && (
