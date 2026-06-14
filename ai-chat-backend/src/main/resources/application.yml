@@ -42,6 +42,7 @@ ai:
     frequency-penalty: ${AI_FREQUENCY_PENALTY:0.0}
     presence-penalty: ${AI_PRESENCE_PENALTY:0.0}
     stop: ${AI_STOP:}
+    history-limit: ${AI_HISTORY_LIMIT:10}
 
 logging:
   level:

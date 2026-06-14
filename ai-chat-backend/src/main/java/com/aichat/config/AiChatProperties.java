@@ -21,6 +21,7 @@ public class AiChatProperties {
     private Double frequencyPenalty = 0.0;
     private Double presencePenalty = 0.0;
     private List<String> stop;
+    private Integer historyLimit = 10;
 
     public String getProvider() {
         return provider;
@@ -132,5 +133,13 @@ public class AiChatProperties {
 
     public void setStop(List<String> stop) {
         this.stop = stop;
+    }
+
+    public Integer getHistoryLimit() {
+        return historyLimit;
+    }
+
+    public void setHistoryLimit(Integer historyLimit) {
+        this.historyLimit = historyLimit;
     }
 }
