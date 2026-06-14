@@ -257,10 +257,6 @@ public class AiChatService {
 
         String sessionId = request.getSessionId();
         if (sessionId != null && !sessionId.isEmpty()) {
-            // Generate summary synchronously if needed BEFORE loading history
-            // This ensures summary is available in DB for this request
-            generateSummaryIfNeeded(sessionId, provider, model);
-            
             // Load limited history from database using sessionId with summary
             var history = historyService.getLimitedHistoryWithSummary(sessionId, properties.getHistoryLimit());
             for (var msg : history) {
@@ -359,50 +355,71 @@ public class AiChatService {
     public SummaryResult generateSummaryIfNeeded(String sessionId, String provider, String model) {
         int historyLimit = properties.getHistoryLimit();
         var allMessages = historyService.getSessionHistory(sessionId);
-        
-        // Only generate/update summary if we have more than historyLimit messages
-        if (allMessages.size() > historyLimit) {
-            var limitedHistory = historyService.getLimitedHistoryWithSummary(sessionId, historyLimit);
-            
-            // Get existing summary if present
-            String existingSummary = limitedHistory.stream()
-                .filter(msg -> "system".equals(msg.getRole()))
-                .map(ChatMessageDTO::getContent)
-                .findFirst()
-                .orElse(null);
-            
-            // Always update summary when threshold is exceeded
-            // This merges new messages with existing summary
-            try {
-                SummaryResult result = generateSummaryText(sessionId, allMessages, historyLimit, provider, model, existingSummary);
-                if (result != null && result.getSummaryText() != null) {
-                    historyService.generateAndSaveSummary(sessionId, historyLimit, result.getSummaryText());
-                    logger.info("{} summary for session {}: {} characters", 
-                        existingSummary == null ? "Generated" : "Updated", 
-                        sessionId, result.getSummaryText().length());
-                }
-                return result;
-            } catch (Exception e) {
-                logger.error("Failed to generate summary for session {}", sessionId, e);
+
+        int oldMessageCount = allMessages.size() - historyLimit;
+        if (oldMessageCount <= 0) {
+            return null;
+        }
+
+        int existingSummaryIndex = findExistingSummaryIndex(allMessages, historyLimit);
+        int startIndex;
+        int endIndex;
+        String existingSummary = null;
+
+        if (existingSummaryIndex < 0) {
+            startIndex = 0;
+            endIndex = oldMessageCount;
+        } else {
+            startIndex = existingSummaryIndex + 1;
+            int unsummarizedCount = oldMessageCount - startIndex;
+            if (unsummarizedCount < 5) {
                 return null;
             }
+            endIndex = startIndex + 5;
+            existingSummary = allMessages.get(existingSummaryIndex).getSummary();
         }
-        return null;
+
+        try {
+            SummaryResult result = generateSummaryText(
+                sessionId, allMessages, startIndex, endIndex, provider, model, existingSummary);
+            if (result != null && result.getSummaryText() != null) {
+                historyService.generateAndSaveSummary(sessionId, historyLimit, result.getSummaryText(), endIndex - 1);
+                logger.info("{} summary for session {}: indices {}-{}, {} characters",
+                    existingSummary == null ? "Generated" : "Updated",
+                    sessionId, startIndex, endIndex - 1, result.getSummaryText().length());
+            }
+            return result;
+        } catch (Exception e) {
+            logger.error("Failed to generate summary for session {}", sessionId, e);
+            return null;
+        }
     }
-    
+
+    private int findExistingSummaryIndex(List<ChatMessageDTO> allMessages, int historyLimit) {
+        int oldMessageCount = allMessages.size() - historyLimit;
+        for (int i = 0; i < oldMessageCount; i++) {
+            String summary = allMessages.get(i).getSummary();
+            if (summary != null && !summary.isEmpty()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /**
-     * Call AI to generate or update a summary of old messages.
+     * Call AI to generate or update a summary of a block of old messages.
      * If existingSummary is provided, merge it with new messages to preserve all facts.
      * Returns SummaryResult containing summary text, request and response for debugging.
      */
-    private SummaryResult generateSummaryText(String sessionId, List<ChatMessageDTO> allMessages, int historyLimit, String provider, String model, String existingSummary) {
-        // Get messages to summarize (all except the last N)
-        int oldMessageCount = allMessages.size() - historyLimit;
-        if (oldMessageCount <= 0) {
-            return new SummaryResult(existingSummary, null, null); // Return existing summary if no new messages to add
+    private SummaryResult generateSummaryText(String sessionId, List<ChatMessageDTO> allMessages,
+                                              int summarizeStartIndex, int summarizeEndIndex,
+                                              String provider, String model, String existingSummary) {
+        if (summarizeStartIndex < 0 || summarizeEndIndex <= summarizeStartIndex
+            || summarizeEndIndex > allMessages.size()) {
+            return new SummaryResult(existingSummary, null, null);
         }
-        
-        List<ChatMessageDTO> messagesToSummarize = allMessages.subList(0, oldMessageCount);
+
+        List<ChatMessageDTO> messagesToSummarize = allMessages.subList(summarizeStartIndex, summarizeEndIndex);
         
         // Build summary request
         StringBuilder summaryPrompt = new StringBuilder();
@@ -453,11 +470,11 @@ public class AiChatService {
         summaryRequest.put("temperature", 0.3); // Lower temperature for more focused summary
         summaryRequest.remove("max_tokens"); // No limit - AI will generate as needed (writes short anyway)
         
-        // Log the summary prompt for debugging
-        logger.info("Summary generation for session {}: mode={}, oldMessageCount={}, existingSummaryLength={}", 
-            sessionId, 
+        logger.info("Summary generation for session {}: mode={}, indices {}-{}, existingSummaryLength={}",
+            sessionId,
             existingSummary != null ? "UPDATE" : "NEW",
-            oldMessageCount,
+            summarizeStartIndex,
+            summarizeEndIndex - 1,
             existingSummary != null ? existingSummary.length() : 0);
         
         // Call AI API to generate summary
