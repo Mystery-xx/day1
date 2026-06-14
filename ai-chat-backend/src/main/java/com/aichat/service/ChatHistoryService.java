@@ -33,10 +33,27 @@ public class ChatHistoryService {
             .collect(Collectors.toList());
     }
     
+    @Transactional(readOnly = true)
     public List<SessionInfoDTO> getAllSessions(int limit, int offset) {
-        // Temporary stub to avoid H2 DISTINCT + ORDER BY issue
-        // Returns empty list until repository query is fixed
-        return List.of();
+        List<String> sessionIds = repository.findAllSessionIds();
+        
+        List<SessionInfoDTO> allSessions = sessionIds.stream()
+            .map(this::toSessionInfo)
+            .sorted((s1, s2) -> {
+                if (s1.getLastMessageAt() == null) return 1;
+                if (s2.getLastMessageAt() == null) return -1;
+                return s2.getLastMessageAt().compareTo(s1.getLastMessageAt());
+            })
+            .collect(Collectors.toList());
+        
+        int start = Math.min(offset, allSessions.size());
+        int end = Math.min(offset + limit, allSessions.size());
+        
+        if (start >= allSessions.size()) {
+            return List.of();
+        }
+        
+        return allSessions.subList(start, end);
     }
     
     public ChatMessageDTO saveMessage(String sessionId, String role, String content, 
@@ -68,6 +85,61 @@ public class ChatHistoryService {
     
     public void deleteAllSessions() {
         repository.deleteAll();
+    }
+    
+    public String duplicateSession(String sessionId) {
+        List<ChatMessage> messages = repository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        
+        if (messages.isEmpty()) {
+            return null;
+        }
+        
+        String newSessionId = UUID.randomUUID().toString();
+        
+        for (ChatMessage originalMessage : messages) {
+            ChatMessage newMessage = new ChatMessage();
+            newMessage.setSessionId(newSessionId);
+            newMessage.setRole(originalMessage.getRole());
+            newMessage.setContent(originalMessage.getContent());
+            newMessage.setModel(originalMessage.getModel());
+            newMessage.setPromptTokens(originalMessage.getPromptTokens());
+            newMessage.setCompletionTokens(originalMessage.getCompletionTokens());
+            newMessage.setTotalTokens(originalMessage.getTotalTokens());
+            newMessage.setResponseTimeMs(originalMessage.getResponseTimeMs());
+            newMessage.setProvider(originalMessage.getProvider());
+            newMessage.setTemperature(originalMessage.getTemperature());
+            newMessage.setMaxTokens(originalMessage.getMaxTokens());
+            newMessage.setCreatedAt(originalMessage.getCreatedAt());
+            repository.save(newMessage);
+        }
+        
+        return newSessionId;
+    }
+    
+    /**
+     * Calculate cumulative token usage for a session.
+     * Returns an array of [promptTokens, completionTokens, totalTokens].
+     */
+    public int[] getSessionTokenUsage(String sessionId) {
+        List<ChatMessage> messages = repository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        
+        int totalPromptTokens = 0;
+        int totalCompletionTokens = 0;
+        int totalTokens = 0;
+        
+        for (ChatMessage message : messages) {
+            if (message.getPromptTokens() != null) {
+                totalPromptTokens += message.getPromptTokens();
+            }
+            if (message.getCompletionTokens() != null) {
+                totalCompletionTokens += message.getCompletionTokens();
+            }
+            if (message.getTotalTokens() != null) {
+                totalTokens += message.getTotalTokens();
+            }
+        }
+        
+        return new int[]{totalPromptTokens, totalCompletionTokens, totalTokens};
     }
     
     private ChatMessageDTO toDTO(ChatMessage entity) {

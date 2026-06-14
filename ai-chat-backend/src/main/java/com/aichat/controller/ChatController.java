@@ -125,6 +125,12 @@ public class ChatController {
                                         request.getSettings() != null ? request.getSettings().getTemperature() : null,
                                         request.getSettings() != null ? request.getSettings().getMaxTokens() : null
                                     );
+                                    
+                                    // Calculate session totals
+                                    int[] sessionTotals = historyService.getSessionTokenUsage(sessionIdForSave);
+                                    response.setSessionTotalPromptTokens(sessionTotals[0]);
+                                    response.setSessionTotalCompletionTokens(sessionTotals[1]);
+                                    response.setSessionTotalTokens(sessionTotals[2]);
                                 }
                                 
                                 // Send full ChatResponse with debug fields + sessionId
@@ -211,5 +217,29 @@ public class ChatController {
                     }
                     return ResponseEntity.ok(models);
                 });
+    }
+    
+    @PostMapping("/sessions/{sessionId}/duplicate")
+    public ResponseEntity<List<String>> duplicateSession(
+            @PathVariable String sessionId,
+            @RequestParam(defaultValue = "3") int count) {
+        logger.info("Duplicating session: {} {} times", sessionId, count);
+        
+        List<String> newSessionIds = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            String newSessionId = historyService.duplicateSession(sessionId);
+            if (newSessionId != null) {
+                newSessionIds.add(newSessionId);
+                logger.info("Created duplicate session #{}: {}", i + 1, newSessionId);
+            } else {
+                logger.warn("Failed to duplicate session {} (copy #{})", sessionId, i + 1);
+            }
+        }
+        
+        if (newSessionIds.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        
+        return ResponseEntity.ok(newSessionIds);
     }
 }

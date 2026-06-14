@@ -14,6 +14,15 @@ public class ChatResponse {
     
     @JsonProperty("debugResponse")
     private Object debugResponse;
+    
+    @JsonProperty("sessionTotalPromptTokens")
+    private Integer sessionTotalPromptTokens;
+    
+    @JsonProperty("sessionTotalCompletionTokens")
+    private Integer sessionTotalCompletionTokens;
+    
+    @JsonProperty("sessionTotalTokens")
+    private Integer sessionTotalTokens;
 
     public ChatResponse() {}
 
@@ -83,5 +92,29 @@ public class ChatResponse {
 
     public void setDebugResponse(Object debugResponse) {
         this.debugResponse = debugResponse;
+    }
+
+    public Integer getSessionTotalPromptTokens() {
+        return sessionTotalPromptTokens;
+    }
+
+    public void setSessionTotalPromptTokens(Integer sessionTotalPromptTokens) {
+        this.sessionTotalPromptTokens = sessionTotalPromptTokens;
+    }
+
+    public Integer getSessionTotalCompletionTokens() {
+        return sessionTotalCompletionTokens;
+    }
+
+    public void setSessionTotalCompletionTokens(Integer sessionTotalCompletionTokens) {
+        this.sessionTotalCompletionTokens = sessionTotalCompletionTokens;
+    }
+
+    public Integer getSessionTotalTokens() {
+        return sessionTotalTokens;
+    }
+
+    public void setSessionTotalTokens(Integer sessionTotalTokens) {
+        this.sessionTotalTokens = sessionTotalTokens;
     }
 }

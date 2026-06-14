@@ -1,4 +1,4 @@
-function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory }) {
+function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory, sessions, onSessionSelect, onDeleteSession, sessionsLoading }) {
   const handleChange = (key, value) => {
     onSettingsChange({
       ...settings,
@@ -223,6 +223,84 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
               Текущая сессия: {sessionId.substring(0, 8)}...
             </div>
           )}
+        </div>
+
+        <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
+          <label>Список сессий</label>
+          <div style={{ marginTop: '10px' }}>
+            {sessionsLoading ? (
+              <div style={{ padding: '10px', textAlign: 'center', color: '#666' }}>
+                <span className="loading"></span>
+                <span style={{ marginLeft: '8px' }}>Загрузка...</span>
+              </div>
+            ) : sessions && sessions.length > 0 ? (
+              <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                {sessions.map((session) => (
+                  <div
+                    key={session.sessionId}
+                    className={`session-item ${session.sessionId === sessionId ? 'session-item-active' : ''}`}
+                    onClick={() => onSessionSelect(session.sessionId)}
+                    style={{
+                      padding: '10px',
+                      borderRadius: '6px',
+                      border: `1px solid ${session.sessionId === sessionId ? '#4CAF50' : '#e0e0e0'}`,
+                      background: session.sessionId === sessionId ? '#f0f9f0' : '#fff',
+                      cursor: 'pointer',
+                      marginBottom: '8px',
+                      transition: 'all 0.2s'
+                    }}
+                    title={session.sessionId}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '600', color: '#333' }}>
+                        {session.sessionId.substring(0, 8)}...
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('Вы уверены, что хотите удалить эту сессию?')) {
+                            onDeleteSession(session.sessionId);
+                          }
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          border: '1px solid #f44336',
+                          background: '#fff',
+                          color: '#f44336',
+                          fontWeight: '500'
+                        }}
+                        title="Удалить сессию"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#666', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {session.preview ? (session.preview.length > 50 ? session.preview.substring(0, 50) + '...' : session.preview) : 'Пустая сессия'}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#999' }}>
+                      <span>Сообщений: {session.messageCount}</span>
+                      <span>
+                        {session.lastMessageAt ? new Date(session.lastMessageAt).toLocaleString('ru-RU', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        }) : ''}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: '10px', textAlign: 'center', color: '#999', fontSize: '13px' }}>
+                Нет сохраненных сессий
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -4,18 +4,19 @@ import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
 import { useSession } from './hooks/useSession'
 import { useChatHistory } from './hooks/useChatHistory'
+import { useSessionList } from './hooks/useSessionList'
 
 function App() {
+  const inputRef = useRef(null)
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
   
-  // Use session management
   const { sessionId, isLoading: sessionLoading, createNewSession, clearSession } = useSession()
-  // Use backend chat history
   const { history: backendHistory, addEntry, refresh } = useChatHistory(sessionId)
+  const { sessions, isLoading: sessionsLoading, fetchSessions, deleteSession: deleteSessionFromList } = useSessionList()
   
   const [settings, setSettings] = useState({
     provider: 'gpustack',
@@ -39,18 +40,23 @@ function App() {
   // Load messages from backend history when it changes
   useEffect(() => {
     if (backendHistory.length > 0) {
-      // Convert backend DTO to frontend message format
       const convertedMessages = backendHistory.map(msg => ({
         role: msg.role,
         content: msg.content
       }))
       setMessages(convertedMessages)
+      setTimeout(() => scrollToBottom(), 100)
+      setTimeout(() => inputRef.current?.focus(), 150)
     }
   }, [backendHistory])
 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    fetchSessions()
+  }, [sessionId, fetchSessions])
 
   useEffect(() => {
     let cancelled = false
@@ -103,6 +109,9 @@ function App() {
     setMessages(newMessages)
     setInputValue('')
     setIsLoading(true)
+    
+    setTimeout(() => scrollToBottom(), 50)
+    setTimeout(() => inputRef.current?.focus(), 100)
 
     try {
       // Create settings object without empty stop array to avoid JSON parsing issues
@@ -178,8 +187,8 @@ function App() {
                 setMessages(prev => [...prev, { role: 'system', content: `Error: ${response.error}` }])
               } else if (response.content) {
                 setMessages(prev => [...prev, { role: 'assistant', content: response.content }])
-                // Refresh history from backend to show persisted messages
                 refresh()
+                fetchSessions()  // Update session list with new message count/timestamps
               } else {
                 console.warn('No content in response:', response)
               }
@@ -224,6 +233,7 @@ function App() {
       try {
         await fetch(`/api/chat/history/${sessionId}`, { method: 'DELETE' })
         await refresh()
+        await fetchSessions()
       } catch (error) {
         console.error('Error clearing history:', error)
       }
@@ -231,6 +241,33 @@ function App() {
     setMessages([])
     setLastRequest(null)
     setLastResponse(null)
+  }
+
+  const handleSessionSelect = async (newSessionId) => {
+    if (newSessionId === sessionId) return
+    
+    try {
+      localStorage.setItem('chat_current_session', newSessionId)
+      window.location.reload()
+    } catch (error) {
+      console.error('Error switching session:', error)
+    }
+  }
+
+  const handleDeleteSession = async (sessionIdToDelete) => {
+    try {
+      const success = await deleteSessionFromList(sessionIdToDelete)
+      if (success) {
+        // If deleted current session, create new one
+        if (sessionIdToDelete === sessionId) {
+          await handleNewChat()
+        } else {
+          await fetchSessions()
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error)
+    }
   }
 
   return (
@@ -243,6 +280,10 @@ function App() {
         sessionId={sessionId}
         onNewChat={handleNewChat}
         onClearHistory={handleClearHistory}
+        sessions={sessions}
+        onSessionSelect={handleSessionSelect}
+        onDeleteSession={handleDeleteSession}
+        sessionsLoading={sessionsLoading}
       />
       <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} requestHistory={backendHistory} />
       <div className="chat-section">
@@ -282,6 +323,7 @@ function App() {
 
         <div className="chat-input-container">
           <input
+            ref={inputRef}
             type="text"
             className="chat-input"
             value={inputValue}
