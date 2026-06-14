@@ -4,6 +4,8 @@ import com.aichat.config.AiChatProperties;
 import com.aichat.dto.ChatRequest;
 import com.aichat.dto.ChatResponse;
 import com.aichat.dto.ModelInfo;
+import com.aichat.dto.ChatMessageDTO;
+import com.aichat.dto.SummaryResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -15,6 +17,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
@@ -246,10 +249,20 @@ public class AiChatService {
     private Map<String, Object> buildRequestBody(ChatRequest request) {
         List<Map<String, String>> messages = new ArrayList<>();
 
-        // Load history from database using sessionId
+        ChatRequest.ModelSettings requestSettings = request.getSettings();
+        String model = (requestSettings != null && requestSettings.getModel() != null)
+            ? requestSettings.getModel()
+            : properties.getModel();
+        String provider = requestSettings != null ? requestSettings.getProvider() : null;
+
         String sessionId = request.getSessionId();
         if (sessionId != null && !sessionId.isEmpty()) {
-            var history = historyService.getSessionHistory(sessionId);
+            // Generate summary synchronously if needed BEFORE loading history
+            // This ensures summary is available in DB for this request
+            generateSummaryIfNeeded(sessionId, provider, model);
+            
+            // Load limited history from database using sessionId with summary
+            var history = historyService.getLimitedHistoryWithSummary(sessionId, properties.getHistoryLimit());
             for (var msg : history) {
                 Map<String, String> message = new HashMap<>();
                 message.put("role", msg.getRole());
@@ -267,10 +280,6 @@ public class AiChatService {
         Map<String, Object> requestBody = new HashMap<>();
         
         // Use model from request settings, fall back to properties
-        ChatRequest.ModelSettings requestSettings = request.getSettings();
-        String model = (requestSettings != null && requestSettings.getModel() != null) 
-            ? requestSettings.getModel() 
-            : properties.getModel();
         requestBody.put("model", model);
         
         requestBody.put("messages", messages);
@@ -340,6 +349,165 @@ public class AiChatService {
         }
 
         return requestBody;
+    }
+
+    /**
+     * Generate summary for old messages if needed.
+     * Called after saving messages to check if summary should be created or updated.
+     * Returns SummaryResult with text, request and response for debugging.
+     */
+    public SummaryResult generateSummaryIfNeeded(String sessionId, String provider, String model) {
+        int historyLimit = properties.getHistoryLimit();
+        var allMessages = historyService.getSessionHistory(sessionId);
+        
+        // Only generate/update summary if we have more than historyLimit messages
+        if (allMessages.size() > historyLimit) {
+            var limitedHistory = historyService.getLimitedHistoryWithSummary(sessionId, historyLimit);
+            
+            // Get existing summary if present
+            String existingSummary = limitedHistory.stream()
+                .filter(msg -> "system".equals(msg.getRole()))
+                .map(ChatMessageDTO::getContent)
+                .findFirst()
+                .orElse(null);
+            
+            // Always update summary when threshold is exceeded
+            // This merges new messages with existing summary
+            try {
+                SummaryResult result = generateSummaryText(sessionId, allMessages, historyLimit, provider, model, existingSummary);
+                if (result != null && result.getSummaryText() != null) {
+                    historyService.generateAndSaveSummary(sessionId, historyLimit, result.getSummaryText());
+                    logger.info("{} summary for session {}: {} characters", 
+                        existingSummary == null ? "Generated" : "Updated", 
+                        sessionId, result.getSummaryText().length());
+                }
+                return result;
+            } catch (Exception e) {
+                logger.error("Failed to generate summary for session {}", sessionId, e);
+                return null;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Call AI to generate or update a summary of old messages.
+     * If existingSummary is provided, merge it with new messages to preserve all facts.
+     * Returns SummaryResult containing summary text, request and response for debugging.
+     */
+    private SummaryResult generateSummaryText(String sessionId, List<ChatMessageDTO> allMessages, int historyLimit, String provider, String model, String existingSummary) {
+        // Get messages to summarize (all except the last N)
+        int oldMessageCount = allMessages.size() - historyLimit;
+        if (oldMessageCount <= 0) {
+            return new SummaryResult(existingSummary, null, null); // Return existing summary if no new messages to add
+        }
+        
+        List<ChatMessageDTO> messagesToSummarize = allMessages.subList(0, oldMessageCount);
+        
+        // Build summary request
+        StringBuilder summaryPrompt = new StringBuilder();
+        
+        if (existingSummary != null && !existingSummary.isEmpty()) {
+            // UPDATE MODE: Merge existing summary with new messages
+            summaryPrompt.append("You have an existing summary of a conversation. ");
+            summaryPrompt.append("Update this summary by incorporating information from the new messages below.\n\n");
+            summaryPrompt.append("RULES:\n");
+            summaryPrompt.append("- PRESERVE ALL facts, names, preferences, and decisions from the existing summary\n");
+            summaryPrompt.append("- DO NOT remove or change any existing information\n");
+            summaryPrompt.append("- DO NOT invent anything that is not present in the conversation\n");
+            summaryPrompt.append("- Add new topics, decisions, or conclusions from the new messages\n");
+            summaryPrompt.append("- Write VERY SHORT bullet points (1-2 lines each)\n");
+            summaryPrompt.append("- Be concise but keep ALL important details\n\n");
+            summaryPrompt.append("EXISTING SUMMARY:\n");
+            summaryPrompt.append(existingSummary).append("\n\n");
+            summaryPrompt.append("NEW MESSAGES TO ADD:\n");
+        } else {
+            // NEW MODE: Create summary from scratch
+            summaryPrompt.append("Summarize the following conversation history.\n\n");
+            summaryPrompt.append("RULES:\n");
+            summaryPrompt.append("- Keep all facts, names, preferences, and decisions mentioned\n");
+            summaryPrompt.append("- DO NOT invent anything that is not present in the conversation\n");
+            summaryPrompt.append("- Write VERY SHORT bullet points (1-2 lines each)\n");
+            summaryPrompt.append("- Be concise but keep ALL important details\n\n");
+        }
+        
+        for (ChatMessageDTO msg : messagesToSummarize) {
+            String role = msg.getRole();
+            String content = msg.getContent();
+            summaryPrompt.append(role.toUpperCase()).append(": ").append(content).append("\n");
+        }
+        
+        summaryPrompt.append("\nUpdated Summary:");
+        
+        // Create a minimal request for summary generation
+        Map<String, Object> summaryRequest = new HashMap<>();
+        summaryRequest.put("model", model != null ? model : properties.getModel());
+        
+        List<Map<String, String>> summaryMessages = new ArrayList<>();
+        Map<String, String> userMsg = new HashMap<>();
+        userMsg.put("role", "user");
+        userMsg.put("content", summaryPrompt.toString());
+        summaryMessages.add(userMsg);
+        
+        summaryRequest.put("messages", summaryMessages);
+        summaryRequest.put("temperature", 0.3); // Lower temperature for more focused summary
+        summaryRequest.remove("max_tokens"); // No limit - AI will generate as needed (writes short anyway)
+        
+        // Log the summary prompt for debugging
+        logger.info("Summary generation for session {}: mode={}, oldMessageCount={}, existingSummaryLength={}", 
+            sessionId, 
+            existingSummary != null ? "UPDATE" : "NEW",
+            oldMessageCount,
+            existingSummary != null ? existingSummary.length() : 0);
+        
+        // Call AI API to generate summary
+        try {
+            String baseUrl = getBaseUrlForProvider(provider != null ? provider : properties.getProvider());
+            String apiKey = getApiKeyForProvider(provider != null ? provider : properties.getProvider());
+            
+            WebClient summaryClient = WebClient.builder()
+                    .baseUrl(baseUrl)
+                    .clientConnector(new ReactorClientHttpConnector(HttpClient.create()))
+                    .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                    .build();
+            
+            // Use reactive call on boundedElastic scheduler to avoid blocking
+            Map<String, Object> summaryResponse = summaryClient.post()
+                    .uri("/chat/completions")
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .bodyValue(summaryRequest)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .publishOn(Schedulers.boundedElastic())
+                    .block(Duration.ofSeconds(60)); // Increased timeout to 60 seconds
+            
+            String summaryContent = null;
+            if (summaryResponse != null) {
+                List<Map<String, Object>> choices = (List<Map<String, Object>>) summaryResponse.get("choices");
+                if (choices != null && !choices.isEmpty()) {
+                    Map<String, String> message = (Map<String, String>) choices.get(0).get("message");
+                    if (message != null) {
+                        summaryContent = message.get("content");
+                        // Trim summary, remove "Updated Summary:" prefix if present
+                        summaryContent = summaryContent != null ? summaryContent.trim() : null;
+                    }
+                }
+            }
+            
+            if (summaryContent == null) {
+                logger.warn("Failed to generate summary: empty response from AI");
+                summaryContent = existingSummary != null ? existingSummary : "Previous conversation history summarized.";
+            }
+            
+            // Return SummaryResult with text, request and response for debugging
+            return new SummaryResult(summaryContent, summaryRequest, summaryResponse);
+            
+        } catch (Exception e) {
+            logger.error("Error generating summary", e);
+            String fallback = existingSummary != null ? existingSummary : "Previous conversation history available.";
+            return new SummaryResult(fallback, null, null);
+        }
     }
 
 }

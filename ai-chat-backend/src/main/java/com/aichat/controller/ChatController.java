@@ -131,6 +131,15 @@ public class ChatController {
                                     response.setSessionTotalPromptTokens(sessionTotals[0]);
                                     response.setSessionTotalCompletionTokens(sessionTotals[1]);
                                     response.setSessionTotalTokens(sessionTotals[2]);
+                                    
+                                    // Generate summary if needed and capture debug info
+                                    String provider = request.getSettings() != null ? request.getSettings().getProvider() : null;
+                                    String model = request.getSettings() != null ? request.getSettings().getModel() : null;
+                                    var summaryResult = chatService.generateSummaryIfNeeded(sessionIdForSave, provider, model);
+                                    if (summaryResult != null) {
+                                        response.setDebugSummaryRequest(summaryResult.getRequest());
+                                        response.setDebugSummaryResponse(summaryResult.getResponse());
+                                    }
                                 }
                                 
                                 // Send full ChatResponse with debug fields + sessionId
@@ -241,5 +250,12 @@ public class ChatController {
         }
         
         return ResponseEntity.ok(newSessionIds);
+    }
+    
+    @DeleteMapping("/sessions/{sessionId}/summary")
+    public ResponseEntity<Void> deleteSessionSummary(@PathVariable String sessionId) {
+        logger.info("Deleting summary for session: {}", sessionId);
+        historyService.deleteSessionSummary(sessionId);
+        return ResponseEntity.noContent().build();
     }
 }
