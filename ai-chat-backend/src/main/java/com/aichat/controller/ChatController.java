@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -85,6 +86,7 @@ public class ChatController {
                 
                 // Then call AI API and emit response when ready
                 chatService.sendMessage(request)
+                    .publishOn(Schedulers.boundedElastic())
                     .subscribe(
                         response -> {
                             try {
