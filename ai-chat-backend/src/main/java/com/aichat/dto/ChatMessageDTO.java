@@ -16,6 +16,7 @@ public class ChatMessageDTO {
     private Double temperature;
     private Integer maxTokens;
     private Instant createdAt;
+    private String summary;
     
     public ChatMessageDTO() {
     }
@@ -122,5 +123,13 @@ public class ChatMessageDTO {
     
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+    
+    public String getSummary() {
+        return summary;
+    }
+    
+    public void setSummary(String summary) {
+        this.summary = summary;
     }
 }

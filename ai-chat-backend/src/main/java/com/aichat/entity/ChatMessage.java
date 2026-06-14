@@ -51,6 +51,9 @@ public class ChatMessage {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
     
+    @Column(name = "summary", columnDefinition = "TEXT")
+    private String summary;
+    
     public enum Role {
         USER, ASSISTANT, SYSTEM
     }
@@ -162,5 +165,13 @@ public class ChatMessage {
     
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+    
+    public String getSummary() {
+        return summary;
+    }
+    
+    public void setSummary(String summary) {
+        this.summary = summary;
     }
 }
