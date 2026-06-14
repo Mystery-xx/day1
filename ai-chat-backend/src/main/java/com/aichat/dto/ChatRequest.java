@@ -1,6 +1,7 @@
 package com.aichat.dto;
 
 import java.util.List;
+import java.util.Map;
 
 public class ChatRequest {
     private String sessionId;
@@ -78,6 +79,10 @@ public class ChatRequest {
         private Double presencePenalty;
         private List<String> stop;
         private Boolean sendHistory;
+        private String contextStrategy;
+        private Integer contextWindowSize;
+        private Map<String, String> stickyFacts;
+        private Boolean autoExtractFacts;
 
         public String getProvider() {
             return provider;
@@ -149,6 +154,38 @@ public class ChatRequest {
 
         public void setSendHistory(Boolean sendHistory) {
             this.sendHistory = sendHistory;
+        }
+
+        public String getContextStrategy() {
+            return contextStrategy;
+        }
+
+        public void setContextStrategy(String contextStrategy) {
+            this.contextStrategy = contextStrategy;
+        }
+
+        public Integer getContextWindowSize() {
+            return contextWindowSize;
+        }
+
+        public void setContextWindowSize(Integer contextWindowSize) {
+            this.contextWindowSize = contextWindowSize;
+        }
+
+        public Map<String, String> getStickyFacts() {
+            return stickyFacts;
+        }
+
+        public void setStickyFacts(Map<String, String> stickyFacts) {
+            this.stickyFacts = stickyFacts;
+        }
+
+        public Boolean getAutoExtractFacts() {
+            return autoExtractFacts;
+        }
+
+        public void setAutoExtractFacts(Boolean autoExtractFacts) {
+            this.autoExtractFacts = autoExtractFacts;
         }
     }
 }

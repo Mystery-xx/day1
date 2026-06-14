@@ -6,8 +6,11 @@ import com.aichat.dto.ModelInfo;
 import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SessionInfoDTO;
 import com.aichat.dto.SessionCreateResponse;
+import com.aichat.dto.StickyFactDTO;
 import com.aichat.service.AiChatService;
 import com.aichat.service.ChatHistoryService;
+import com.aichat.service.StickyFactService;
+import com.aichat.service.FactExtractionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -36,10 +39,15 @@ public class ChatController {
 
     private final AiChatService chatService;
     private final ChatHistoryService historyService;
+    private final StickyFactService stickyFactService;
+    private final FactExtractionService factExtractionService;
 
-    public ChatController(AiChatService chatService, ChatHistoryService historyService) {
+    public ChatController(AiChatService chatService, ChatHistoryService historyService,
+                          StickyFactService stickyFactService, FactExtractionService factExtractionService) {
         this.chatService = chatService;
         this.historyService = historyService;
+        this.stickyFactService = stickyFactService;
+        this.factExtractionService = factExtractionService;
     }
 
     @PostMapping
@@ -62,6 +70,7 @@ public class ChatController {
         String sessionId = request.getSessionId();
         if (sessionId == null || sessionId.isEmpty()) {
             sessionId = historyService.createSession();
+            request.setSessionId(sessionId);
         }
         
         final String finalSessionId = sessionId;
@@ -72,6 +81,7 @@ public class ChatController {
             try {
                 // Immediately emit debugRequest + sessionId
                 Map<String, Object> debugRequest = chatService.buildDebugRequest(request);
+                
                 logger.debug("Emitting debug request immediately: {}", debugRequest);
                 String debugRequestJson = mapper.writeValueAsString(Map.of(
                     "type", "debugRequest", 
@@ -135,13 +145,26 @@ public class ChatController {
                                     response.setSessionTotalTokens(sessionTotals[2]);
                                     
                                     // Generate summary if needed and capture debug info
+                                    // Skip summary generation for StickyFacts strategy (uses facts instead)
                                     String provider = request.getSettings() != null ? request.getSettings().getProvider() : null;
                                     String model = request.getSettings() != null ? request.getSettings().getModel() : null;
-                                    var summaryResult = chatService.generateSummaryIfNeeded(sessionIdForSave, provider, model);
+                                    String strategy = request.getSettings() != null ? request.getSettings().getContextStrategy() : null;
+                                    boolean shouldGenerateSummary = !"stickyFacts".equalsIgnoreCase(strategy);
+                                    var summaryResult = shouldGenerateSummary ? chatService.generateSummaryIfNeeded(sessionIdForSave, provider, model) : null;
                                     if (summaryResult != null) {
                                         response.setDebugSummaryRequest(summaryResult.getRequest());
                                         response.setDebugSummaryResponse(summaryResult.getResponse());
                                     }
+                                    
+                                    // Add sticky facts for debug panel (always include, even if empty)
+                                    List<StickyFactDTO> responseStickyFacts = stickyFactService.getFacts(sessionIdForSave);
+                                    Map<String, Object> stickyFactsDebug = new HashMap<>();
+                                    stickyFactsDebug.put("stickyFacts", responseStickyFacts != null ? responseStickyFacts : List.of());
+                                    response.setDebugStickyFacts(stickyFactsDebug);
+                                    
+                                    // Flag to indicate sticky facts may have been updated (for auto-extraction)
+                                    // Frontend should refresh if this flag is true or if facts changed
+                                    response.setStickyFactsUpdated(true);
                                 }
                                 
                                 // Send full ChatResponse with debug fields + sessionId
@@ -254,10 +277,79 @@ public class ChatController {
         return ResponseEntity.ok(newSessionIds);
     }
     
+    @PostMapping("/sessions/{sessionId}/branch")
+    public ResponseEntity<String> createBranch(
+            @PathVariable String sessionId,
+            @RequestParam int messageIndex) {
+        logger.info("Creating branch from session: {} up to message index: {}", sessionId, messageIndex);
+        
+        String newSessionId = historyService.duplicateSessionUpToIndex(sessionId, messageIndex);
+        
+        if (newSessionId == null) {
+            logger.warn("Failed to create branch from session {} at index {}", sessionId, messageIndex);
+            return ResponseEntity.notFound().build();
+        }
+        
+        logger.info("Created branch session: {}", newSessionId);
+        return ResponseEntity.ok(newSessionId);
+    }
+    
     @DeleteMapping("/sessions/{sessionId}/summary")
     public ResponseEntity<Void> deleteSessionSummary(@PathVariable String sessionId) {
         logger.info("Deleting summary for session: {}", sessionId);
         historyService.deleteSessionSummary(sessionId);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/sessions/{sessionId}/sticky-facts")
+    public ResponseEntity<List<StickyFactDTO>> getStickyFacts(@PathVariable String sessionId) {
+        logger.info("Fetching sticky facts for session: {}", sessionId);
+        return ResponseEntity.ok(stickyFactService.getFacts(sessionId));
+    }
+
+    @PostMapping("/sessions/{sessionId}/sticky-facts")
+    public ResponseEntity<StickyFactDTO> saveStickyFact(
+            @PathVariable String sessionId,
+            @RequestBody Map<String, String> body) {
+        String factKey = body.get("factKey");
+        String factValue = body.get("factValue");
+        if (factKey == null || factKey.isBlank() || factValue == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        logger.info("Saving sticky fact for session {}: key={}", sessionId, factKey);
+        return ResponseEntity.ok(stickyFactService.saveFact(sessionId, factKey.trim(), factValue.trim()));
+    }
+
+    @DeleteMapping("/sessions/{sessionId}/sticky-facts/{factKey}")
+    public ResponseEntity<Void> deleteStickyFact(
+            @PathVariable String sessionId,
+            @PathVariable String factKey) {
+        logger.info("Deleting sticky fact for session {}: key={}", sessionId, factKey);
+        stickyFactService.deleteFact(sessionId, factKey);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/sessions/{sessionId}/sticky-facts")
+    public ResponseEntity<Void> deleteAllStickyFacts(@PathVariable String sessionId) {
+        logger.info("Deleting all sticky facts for session: {}", sessionId);
+        stickyFactService.deleteFactsBySession(sessionId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/sessions/{sessionId}/extract-facts")
+    public ResponseEntity<Map<String, String>> extractFacts(
+            @PathVariable String sessionId,
+            @RequestBody(required = false) Map<String, Object> options) {
+        logger.info("Manually triggering fact extraction for session: {}", sessionId);
+        
+        String model = options != null && options.get("model") != null 
+            ? (String) options.get("model") 
+            : null;
+        String provider = options != null && options.get("provider") != null 
+            ? (String) options.get("provider") 
+            : null;
+        
+        Map<String, String> extractedFacts = factExtractionService.extractAndSaveFacts(sessionId, model, provider);
+        return ResponseEntity.ok(extractedFacts);
     }
 }

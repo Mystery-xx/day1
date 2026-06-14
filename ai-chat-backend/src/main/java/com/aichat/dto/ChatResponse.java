@@ -21,6 +21,12 @@ public class ChatResponse {
     @JsonProperty("debugSummaryResponse")
     private Object debugSummaryResponse;
     
+    @JsonProperty("debugStickyFacts")
+    private Object debugStickyFacts;
+    
+    @JsonProperty("stickyFactsUpdated")
+    private Boolean stickyFactsUpdated;
+    
     @JsonProperty("sessionTotalPromptTokens")
     private Integer sessionTotalPromptTokens;
     
@@ -114,6 +120,22 @@ public class ChatResponse {
 
     public void setDebugSummaryResponse(Object debugSummaryResponse) {
         this.debugSummaryResponse = debugSummaryResponse;
+    }
+
+    public Object getDebugStickyFacts() {
+        return debugStickyFacts;
+    }
+
+    public void setDebugStickyFacts(Object debugStickyFacts) {
+        this.debugStickyFacts = debugStickyFacts;
+    }
+
+    public Boolean getStickyFactsUpdated() {
+        return stickyFactsUpdated;
+    }
+
+    public void setStickyFactsUpdated(Boolean stickyFactsUpdated) {
+        this.stickyFactsUpdated = stickyFactsUpdated;
     }
 
     public Integer getSessionTotalPromptTokens() {

@@ -202,6 +202,43 @@ public class ChatHistoryService {
     }
     
     /**
+     * Create a new session with messages copied from an existing session up to a specific index (inclusive).
+     * @param sessionId Source session ID
+     * @param messageIndex Zero-based index of the last message to include (inclusive)
+     * @return New session ID, or null if session is empty or index is invalid
+     */
+    public String duplicateSessionUpToIndex(String sessionId, int messageIndex) {
+        List<ChatMessage> messages = repository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        
+        if (messages.isEmpty() || messageIndex < 0 || messageIndex >= messages.size()) {
+            return null;
+        }
+        
+        String newSessionId = UUID.randomUUID().toString();
+        
+        // Copy messages from index 0 to messageIndex (inclusive)
+        for (int i = 0; i <= messageIndex; i++) {
+            ChatMessage originalMessage = messages.get(i);
+            ChatMessage newMessage = new ChatMessage();
+            newMessage.setSessionId(newSessionId);
+            newMessage.setRole(originalMessage.getRole());
+            newMessage.setContent(originalMessage.getContent());
+            newMessage.setModel(originalMessage.getModel());
+            newMessage.setPromptTokens(originalMessage.getPromptTokens());
+            newMessage.setCompletionTokens(originalMessage.getCompletionTokens());
+            newMessage.setTotalTokens(originalMessage.getTotalTokens());
+            newMessage.setResponseTimeMs(originalMessage.getResponseTimeMs());
+            newMessage.setProvider(originalMessage.getProvider());
+            newMessage.setTemperature(originalMessage.getTemperature());
+            newMessage.setMaxTokens(originalMessage.getMaxTokens());
+            newMessage.setCreatedAt(originalMessage.getCreatedAt());
+            repository.save(newMessage);
+        }
+        
+        return newSessionId;
+    }
+    
+    /**
      * Calculate cumulative token usage for a session.
      * Returns an array of [promptTokens, completionTokens, totalTokens].
      */

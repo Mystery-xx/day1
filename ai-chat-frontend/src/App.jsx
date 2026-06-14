@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
+import { Message } from './components/Message'
 import { useSession } from './hooks/useSession'
 import { useChatHistory } from './hooks/useChatHistory'
 import { useSessionList } from './hooks/useSessionList'
@@ -13,21 +14,36 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
+  const [stickyFactsList, setStickyFactsList] = useState([])
   
   const { sessionId, isLoading: sessionLoading, createNewSession, clearSession } = useSession()
   const { history: backendHistory, addEntry, refresh } = useChatHistory(sessionId)
   const { sessions, isLoading: sessionsLoading, fetchSessions, deleteSession: deleteSessionFromList } = useSessionList()
   
-  const [settings, setSettings] = useState({
-    provider: 'gpustack',
-    model: 'qwen3.5-397b-a17b',
-    temperature: 1.0,
-    maxTokens: 16384,
-    topP: 1.0,
-    frequencyPenalty: 0.0,
-    presencePenalty: 0.0,
-    stop: [],
-    sendHistory: true
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('chat_settings')
+    const defaults = {
+      provider: 'gpustack',
+      model: 'qwen3.5-397b-a17b',
+      temperature: 1.0,
+      maxTokens: 16384,
+      topP: 1.0,
+      frequencyPenalty: 0.0,
+      presencePenalty: 0.0,
+      stop: [],
+      sendHistory: true,
+      contextStrategy: 'summary',
+      contextWindowSize: 10,
+      stickyFacts: {}
+    }
+    if (saved) {
+      try {
+        return { ...defaults, ...JSON.parse(saved) }
+      } catch {
+        return defaults
+      }
+    }
+    return defaults
   })
   const [models, setModels] = useState([])
 
@@ -41,8 +57,10 @@ function App() {
   useEffect(() => {
     if (backendHistory.length > 0) {
       const convertedMessages = backendHistory.map(msg => ({
+        id: msg.id,
         role: msg.role,
-        content: msg.content
+        content: msg.content,
+        createdAt: msg.createdAt
       }))
       setMessages(convertedMessages)
       setTimeout(() => scrollToBottom(), 100)
@@ -57,6 +75,36 @@ function App() {
   useEffect(() => {
     fetchSessions()
   }, [sessionId, fetchSessions])
+
+  // Load sticky facts when session or strategy changes
+  useEffect(() => {
+    if (sessionId && settings.contextStrategy === 'stickyFacts') {
+      fetch(`/api/chat/sessions/${sessionId}/sticky-facts`)
+        .then(res => res.ok ? res.json() : Promise.resolve([]))
+        .then(facts => setStickyFactsList(facts))
+        .catch(() => setStickyFactsList([]))
+    } else {
+      setStickyFactsList([])
+    }
+  }, [sessionId, settings.contextStrategy])
+
+  // Function to manually refresh sticky facts (called after manual extraction)
+  const refreshStickyFacts = async () => {
+    if (!sessionId) return;
+    try {
+      const response = await fetch(`/api/chat/sessions/${sessionId}/sticky-facts`);
+      if (response.ok) {
+        const facts = await response.json();
+        setStickyFactsList(facts);
+      }
+    } catch (error) {
+      console.error('Failed to refresh sticky facts:', error);
+    }
+  };
+
+  useEffect(() => {
+    localStorage.setItem('chat_settings', JSON.stringify(settings))
+  }, [settings])
 
   useEffect(() => {
     let cancelled = false
@@ -168,6 +216,11 @@ function App() {
               setLastResponse(response)
               setIsLoading(false)
               
+              // Refresh sticky facts if backend indicates they were updated (auto-extraction)
+              if (response.stickyFactsUpdated && settings.contextStrategy === 'stickyFacts') {
+                refreshStickyFacts()
+              }
+              
               // Calculate response time in milliseconds
               const responseTime = Math.round(performance.now() - startTime)
               
@@ -227,6 +280,27 @@ function App() {
     setLastResponse(null)
   }
 
+  const handleBranchChat = async (messageIndex) => {
+    if (!sessionId) return
+    
+    try {
+      const response = await fetch(
+        `/api/chat/sessions/${sessionId}/branch?messageIndex=${messageIndex}`,
+        { method: 'POST' }
+      )
+      
+      if (response.ok) {
+        const newSessionId = await response.text()
+        localStorage.setItem('chat_current_session', newSessionId)
+        window.location.reload()
+      } else {
+        console.error('Failed to create branch:', response.status)
+      }
+    } catch (error) {
+      console.error('Error creating branch:', error)
+    }
+  }
+
   const handleClearHistory = async () => {
     // Clear history on backend for current session
     if (sessionId) {
@@ -284,8 +358,15 @@ function App() {
         onSessionSelect={handleSessionSelect}
         onDeleteSession={handleDeleteSession}
         sessionsLoading={sessionsLoading}
+        onFactsRefreshed={refreshStickyFacts}
       />
-      <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} requestHistory={backendHistory} />
+      <DebugPanel 
+        lastRequest={lastRequest} 
+        lastResponse={lastResponse} 
+        requestHistory={backendHistory}
+        stickyFactsList={stickyFactsList}
+        contextStrategy={settings.contextStrategy}
+      />
       <div className="chat-section">
         <div className="chat-header">
           AI Chat
@@ -305,12 +386,12 @@ function App() {
             </div>
           ) : (
             messages.map((message, index) => (
-              <div 
-                key={index} 
-                className={`message ${message.role}`}
-              >
-                <ReactMarkdown>{message.content}</ReactMarkdown>
-              </div>
+              <Message
+                key={message.id || index}
+                message={message}
+                index={index}
+                onBranch={handleBranchChat}
+              />
             ))
           )}
           {isLoading && (

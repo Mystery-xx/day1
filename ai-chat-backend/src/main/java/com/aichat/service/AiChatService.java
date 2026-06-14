@@ -1,6 +1,9 @@
 package com.aichat.service;
 
 import com.aichat.config.AiChatProperties;
+import com.aichat.context.ContextStrategy;
+import com.aichat.context.ContextStrategyFactory;
+import com.aichat.context.ContextStrategyType;
 import com.aichat.dto.ChatRequest;
 import com.aichat.dto.ChatResponse;
 import com.aichat.dto.ModelInfo;
@@ -36,11 +39,14 @@ public class AiChatService {
     private final AiChatProperties properties;
     private final ObjectMapper objectMapper;
     private final ChatHistoryService historyService;
+    private final ContextStrategyFactory contextStrategyFactory;
 
-    public AiChatService(AiChatProperties properties, ChatHistoryService historyService) {
+    public AiChatService(AiChatProperties properties, ChatHistoryService historyService,
+                         ContextStrategyFactory contextStrategyFactory) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         this.historyService = historyService;
+        this.contextStrategyFactory = contextStrategyFactory;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(120));
@@ -56,15 +62,12 @@ public class AiChatService {
         logger.debug("Sending message to AI: {}", request.getMessage());
 
         Map<String, Object> requestBody = buildRequestBody(request);
-
-        logger.debug("AI API Request body: {}", requestBody);
         
         String provider = request.getSettings() != null ? request.getSettings().getProvider() : properties.getProvider();
         String baseUrl = getBaseUrlForProvider(provider);
         String apiKey = getApiKeyForProvider(provider);
         
-        logger.info("SEND MESSAGE - Provider: {}, Base URL: {}, API Key: {}", provider, baseUrl, maskApiKey(apiKey));
-        logger.info("Request body: {}", requestBody);
+        logger.info("Sending message to AI - Provider: {}, Base URL: {}, API Key: {}", provider, baseUrl, maskApiKey(apiKey));
 
         WebClient requestWebClient = WebClient.builder()
                 .baseUrl(baseUrl)
@@ -123,6 +126,14 @@ public class AiChatService {
 
     public Map<String, Object> buildDebugRequest(ChatRequest request) {
         return buildRequestBody(request);
+    }
+
+    private boolean shouldSendHistory(ChatRequest.ModelSettings requestSettings) {
+        if (requestSettings == null) {
+            return true;
+        }
+        Boolean sendHistory = requestSettings.getSendHistory();
+        return sendHistory == null || sendHistory;
     }
 
     public Mono<List<ModelInfo>> fetchModels(String provider) {
@@ -256,9 +267,13 @@ public class AiChatService {
         String provider = requestSettings != null ? requestSettings.getProvider() : null;
 
         String sessionId = request.getSessionId();
-        if (sessionId != null && !sessionId.isEmpty()) {
-            // Load limited history from database using sessionId with summary
-            var history = historyService.getLimitedHistoryWithSummary(sessionId, properties.getHistoryLimit());
+        logger.debug("Building request for session {} with strategy {}", sessionId,
+                requestSettings != null ? requestSettings.getContextStrategy() : "default");
+        if (sessionId != null && !sessionId.isEmpty() && shouldSendHistory(requestSettings)) {
+            ContextStrategyType strategyType = ContextStrategyType.fromString(
+                    requestSettings != null ? requestSettings.getContextStrategy() : null);
+            ContextStrategy strategy = contextStrategyFactory.createStrategy(strategyType);
+            List<ChatMessageDTO> history = strategy.buildContext(sessionId, requestSettings);
             for (var msg : history) {
                 Map<String, String> message = new HashMap<>();
                 message.put("role", msg.getRole());

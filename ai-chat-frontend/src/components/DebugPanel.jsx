@@ -1,14 +1,19 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-function DebugPanel({ lastRequest, lastResponse, requestHistory }) {
+function DebugPanel({ lastRequest, lastResponse, requestHistory, stickyFactsList = [], contextStrategy = 'summary' }) {
   const debugRequest = lastResponse?.debugRequest || lastRequest;
   const debugResponse = lastResponse?.debugResponse;
   const debugSummaryRequest = lastResponse?.debugSummaryRequest;
   const debugSummaryResponse = lastResponse?.debugSummaryResponse;
+  const debugStickyFacts = lastResponse?.debugStickyFacts;
   
   // Extract summary from debug request (first SYSTEM message if present)
   const summaryMessage = debugRequest?.messages?.find(msg => msg.role === 'system');
   const conversationSummary = summaryMessage?.content;
+  
+  // Use sticky facts from props (loaded separately) or from response
+  const hasStickyFacts = contextStrategy === 'stickyFacts' && stickyFactsList && stickyFactsList.length > 0;
+  const factsToShow = hasStickyFacts ? stickyFactsList : (debugStickyFacts?.stickyFacts || []);
   
   const lastAssistantEntry = requestHistory && requestHistory.length > 0
     ? requestHistory.filter(entry => entry.role === 'assistant').at(-1)
@@ -35,14 +40,31 @@ function DebugPanel({ lastRequest, lastResponse, requestHistory }) {
 
   return (
     <div className="debug-panel">
-      {conversationSummary && (
+      {contextStrategy === 'stickyFacts' ? (
+        <div className="debug-section">
+          <h3 className="debug-section-title">Sticky Facts</h3>
+          <div className="debug-content">
+            {factsToShow.length > 0 ? (
+              <div className="sticky-facts-list">
+                {factsToShow.map((fact, index) => (
+                  <div key={index} className="sticky-fact-item">
+                    <strong>{fact.factKey}:</strong> {fact.factValue}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="debug-empty">No sticky facts yet. They will be auto-extracted after a few messages.</div>
+            )}
+          </div>
+        </div>
+      ) : conversationSummary ? (
         <div className="debug-section">
           <h3 className="debug-section-title">Conversation Summary</h3>
           <div className="debug-content">
             <pre className="debug-json">{conversationSummary}</pre>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="debug-section">
         <h3 className="debug-section-title">Token Usage Summary</h3>
