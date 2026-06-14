@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.ArrayList;
 import java.util.stream.Collectors;
 
 @Service
@@ -31,6 +32,89 @@ public class ChatHistoryService {
             .stream()
             .map(this::toDTO)
             .collect(Collectors.toList());
+    }
+    
+    public void deleteSessionSummary(String sessionId) {
+        List<ChatMessage> allMessages = repository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        
+        if (allMessages.isEmpty()) {
+            return;
+        }
+        
+        for (ChatMessage message : allMessages) {
+            message.setSummary(null);
+        }
+        repository.saveAll(allMessages);
+    }
+    
+    /**
+     * Generate and save a summary for old messages in a session.
+     * This should be called when the message count exceeds the threshold.
+     */
+    public void generateAndSaveSummary(String sessionId, int recentCount, String summaryText) {
+        List<ChatMessage> allMessages = repository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        
+        if (allMessages.size() <= recentCount) {
+            return; // No need to summarize
+        }
+        
+        // Find the first old message (the one before recent messages start)
+        int oldMessageCount = allMessages.size() - recentCount;
+        if (oldMessageCount > 0) {
+            ChatMessage firstOldMessage = allMessages.get(0);
+            // Update only the first old message with the summary
+            // This acts as a marker that we have a summary for this session's old messages
+            firstOldMessage.setSummary(summaryText);
+            repository.save(firstOldMessage);
+        }
+    }
+    
+    /**
+     * Get limited message history with summary of older messages.
+     * Returns the last N messages plus a summary of all previous messages.
+     */
+    public List<ChatMessageDTO> getLimitedHistoryWithSummary(String sessionId, int recentCount) {
+        List<ChatMessage> allMessages = repository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        
+        if (allMessages.isEmpty()) {
+            return List.of();
+        }
+        
+        // If total messages <= recentCount, return all messages without summary
+        if (allMessages.size() <= recentCount) {
+            return allMessages.stream()
+                .map(this::toDTO)
+                .collect(Collectors.toList());
+        }
+        
+        // Split into old messages (to summarize) and recent messages (to keep full)
+        List<ChatMessage> oldMessages = allMessages.subList(0, allMessages.size() - recentCount);
+        List<ChatMessage> recentMessages = allMessages.subList(allMessages.size() - recentCount, allMessages.size());
+        
+        // Check if we already have a summary for old messages
+        String existingSummary = oldMessages.stream()
+            .map(ChatMessage::getSummary)
+            .filter(s -> s != null && !s.isEmpty())
+            .findFirst()
+            .orElse(null);
+        
+        List<ChatMessageDTO> result = new ArrayList<>();
+        
+        // If we have an existing summary, add it as a SYSTEM message
+        if (existingSummary != null) {
+            ChatMessageDTO summaryDTO = new ChatMessageDTO();
+            summaryDTO.setSessionId(sessionId);
+            summaryDTO.setRole("system");
+            summaryDTO.setContent(existingSummary);
+            result.add(summaryDTO);
+        }
+        
+        // Add recent messages
+        result.addAll(recentMessages.stream()
+            .map(this::toDTO)
+            .collect(Collectors.toList()));
+        
+        return result;
     }
     
     @Transactional(readOnly = true)
@@ -157,6 +241,7 @@ public class ChatHistoryService {
         dto.setTemperature(entity.getTemperature());
         dto.setMaxTokens(entity.getMaxTokens());
         dto.setCreatedAt(entity.getCreatedAt());
+        dto.setSummary(entity.getSummary());
         return dto;
     }
     
