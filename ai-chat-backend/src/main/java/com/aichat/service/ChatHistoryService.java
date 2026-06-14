@@ -48,25 +48,26 @@ public class ChatHistoryService {
     }
     
     /**
-     * Generate and save a summary for old messages in a session.
-     * This should be called when the message count exceeds the threshold.
+     * Save a cumulative summary for old messages in a session.
+     * The summary is stored on the last message included in the summarized block
+     * so the next batch can start right after it.
      */
-    public void generateAndSaveSummary(String sessionId, int recentCount, String summaryText) {
+    public void generateAndSaveSummary(String sessionId, int recentCount, String summaryText, int summaryEndIndex) {
         List<ChatMessage> allMessages = repository.findBySessionIdOrderByCreatedAtAsc(sessionId);
-        
-        if (allMessages.size() <= recentCount) {
-            return; // No need to summarize
+
+        if (allMessages.size() <= recentCount || summaryEndIndex < 0 || summaryEndIndex >= allMessages.size()) {
+            return;
         }
-        
-        // Find the first old message (the one before recent messages start)
-        int oldMessageCount = allMessages.size() - recentCount;
-        if (oldMessageCount > 0) {
-            ChatMessage firstOldMessage = allMessages.get(0);
-            // Update only the first old message with the summary
-            // This acts as a marker that we have a summary for this session's old messages
-            firstOldMessage.setSummary(summaryText);
-            repository.save(firstOldMessage);
+
+        for (ChatMessage message : allMessages) {
+            if (message.getSummary() != null) {
+                message.setSummary(null);
+            }
         }
+
+        ChatMessage markerMessage = allMessages.get(summaryEndIndex);
+        markerMessage.setSummary(summaryText);
+        repository.saveAll(allMessages);
     }
     
     /**
