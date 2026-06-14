@@ -15,8 +15,11 @@ services:
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
     ports:
       - "8080:8080"
+      - "8082:8082"
     networks:
       - ai-chat-network
+    volumes:
+      - h2-data:/data
     restart: unless-stopped
 
   frontend:
@@ -35,3 +38,6 @@ services:
 networks:
   ai-chat-network:
     driver: bridge
+
+volumes:
+  h2-data:

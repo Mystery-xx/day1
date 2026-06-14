@@ -1,4 +1,4 @@
-function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels }) {
+function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory }) {
   const handleChange = (key, value) => {
     onSettingsChange({
       ...settings,
@@ -180,6 +180,49 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels }) 
             />
           </div>
           <div className="setting-description">Если отключено, AI получает только текущее сообщение без истории диалога</div>
+        </div>
+
+        <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
+          <label>Управление сессией</label>
+          <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+            <button
+              onClick={onNewChat}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                border: '1px solid #4CAF50',
+                background: '#4CAF50',
+                color: 'white',
+                fontWeight: '500'
+              }}
+            >
+              + Новый чат
+            </button>
+            {sessionId && (
+              <button
+                onClick={onClearHistory}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  border: '1px solid #f44336',
+                  background: '#f44336',
+                  color: 'white',
+                  fontWeight: '500'
+                }}
+              >
+                Очистить историю
+              </button>
+            )}
+          </div>
+          {sessionId && (
+            <div className="setting-description" style={{ marginTop: '8px' }}>
+              Текущая сессия: {sessionId.substring(0, 8)}...
+            </div>
+          )}
         </div>
       </div>
     </div>

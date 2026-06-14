@@ -32,10 +32,12 @@ public class AiChatService {
     private final WebClient webClient;
     private final AiChatProperties properties;
     private final ObjectMapper objectMapper;
+    private final ChatHistoryService historyService;
 
-    public AiChatService(AiChatProperties properties) {
+    public AiChatService(AiChatProperties properties, ChatHistoryService historyService) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
+        this.historyService = historyService;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(120));
@@ -244,8 +246,11 @@ public class AiChatService {
     private Map<String, Object> buildRequestBody(ChatRequest request) {
         List<Map<String, String>> messages = new ArrayList<>();
 
-        if (request.getHistory() != null) {
-            for (ChatRequest.Message msg : request.getHistory()) {
+        // Load history from database using sessionId
+        String sessionId = request.getSessionId();
+        if (sessionId != null && !sessionId.isEmpty()) {
+            var history = historyService.getSessionHistory(sessionId);
+            for (var msg : history) {
                 Map<String, String> message = new HashMap<>();
                 message.put("role", msg.getRole());
                 message.put("content", msg.getContent());
@@ -253,6 +258,7 @@ public class AiChatService {
             }
         }
 
+        // Add current user message
         Map<String, String> userMessage = new HashMap<>();
         userMessage.put("role", "user");
         userMessage.put("content", request.getMessage());

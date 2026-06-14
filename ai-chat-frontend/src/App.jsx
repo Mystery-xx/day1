@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
+import { useSession } from './hooks/useSession'
 import { useChatHistory } from './hooks/useChatHistory'
 
 function App() {
@@ -10,7 +11,12 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
-  const { history: requestHistory, addEntry } = useChatHistory()
+  
+  // Use session management
+  const { sessionId, isLoading: sessionLoading, createNewSession, clearSession } = useSession()
+  // Use backend chat history
+  const { history: backendHistory, addEntry, refresh } = useChatHistory(sessionId)
+  
   const [settings, setSettings] = useState({
     provider: 'gpustack',
     model: 'qwen3.5-397b-a17b',
@@ -30,6 +36,18 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  // Load messages from backend history when it changes
+  useEffect(() => {
+    if (backendHistory.length > 0) {
+      // Convert backend DTO to frontend message format
+      const convertedMessages = backendHistory.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }))
+      setMessages(convertedMessages)
+    }
+  }, [backendHistory])
+
   useEffect(() => {
     scrollToBottom()
   }, [messages])
@@ -38,7 +56,6 @@ function App() {
     let cancelled = false
     const provider = settings.provider
 
-    setSettings(prev => ({ ...prev, model: '' }))
     setModels([])
 
     const loadModels = async () => {
@@ -47,6 +64,25 @@ function App() {
         if (response.ok && !cancelled) {
           const data = await response.json()
           setModels(data)
+          // Set default model: prefer qwen3.5-397b-a17b if available, otherwise first model
+          if (data && data.length > 0) {
+            setSettings(prev => {
+              // Extract model IDs - handle both string arrays and model objects
+              const modelIds = data.map(m => typeof m === 'string' ? m : m.id)
+              const currentModelId = typeof prev.model === 'string' ? prev.model : prev.model?.id
+              
+              if (!currentModelId || !modelIds.includes(currentModelId)) {
+                const preferredModel = 'qwen3.5-397b-a17b'
+                const selectedModel = modelIds.includes(preferredModel) ? preferredModel : modelIds[0]
+                return { ...prev, model: selectedModel }
+              }
+              // Ensure model is stored as string ID, not object
+              if (typeof prev.model === 'object') {
+                return { ...prev, model: prev.model.id }
+              }
+              return prev
+            })
+          }
         }
       } catch (error) {
         console.error('Error fetching models:', error)
@@ -58,10 +94,8 @@ function App() {
     return () => { cancelled = true }
   }, [settings.provider])
 
-
-
   const sendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return
+    if (!inputValue.trim() || isLoading || !sessionId) return
 
     const userMessage = { role: 'user', content: inputValue.trim() }
     const newMessages = [...messages, userMessage]
@@ -71,17 +105,24 @@ function App() {
     setIsLoading(true)
 
     try {
+      // Create settings object without empty stop array to avoid JSON parsing issues
+      const { stop, ...settingsWithoutStop } = settings
       const requestBody = {
+        sessionId: sessionId,
         message: userMessage.content,
-        // Only send user/assistant messages in history, skip error messages
-        history: settings.sendHistory ? messages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role, content: m.content })) : [],
-        settings: settings
+        settings: {
+          ...settingsWithoutStop,
+          // Only include stop if it has values
+          ...(stop && stop.length > 0 ? { stop } : {})
+        }
       }
+
+      console.log('Sending request body:', JSON.stringify(requestBody, null, 2))
 
       // Track response time
       const startTime = performance.now()
 
-      // Use SSE streaming with POST to get debugRequest immediately
+      // Use SSE streaming with POST
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: {
@@ -121,7 +162,7 @@ function App() {
               // Calculate response time in milliseconds
               const responseTime = Math.round(performance.now() - startTime)
               
-              // Save to history if we have usage data
+              // Save to history (backend already saved, this is for local analytics)
               if (response.usage) {
                 addEntry({
                   provider: settings.provider,
@@ -134,10 +175,11 @@ function App() {
               }
               
               if (response.error) {
-                // Don't add error messages to chat history - they cause 400 errors from AI API
                 setMessages(prev => [...prev, { role: 'system', content: `Error: ${response.error}` }])
               } else if (response.content) {
-                setMessages([...newMessages, { role: 'assistant', content: response.content }])
+                setMessages(prev => [...prev, { role: 'assistant', content: response.content }])
+                // Refresh history from backend to show persisted messages
+                refresh()
               } else {
                 console.warn('No content in response:', response)
               }
@@ -146,7 +188,6 @@ function App() {
         }
       }
     } catch (error) {
-      // Don't add error messages to chat history - they cause 400 errors from AI API
       setMessages(prev => [...prev, { 
         role: 'system', 
         content: `Network error: ${error.message}` 
@@ -163,20 +204,61 @@ function App() {
   }
 
   const handleRefreshModels = () => {
-    fetchModels(settings.provider)
+    const provider = settings.provider
+    fetch(`/api/chat/models?provider=${provider}`)
+      .then(res => res.json())
+      .then(setModels)
+      .catch(() => setModels([]))
+  }
+
+  const handleNewChat = async () => {
+    await createNewSession()
+    setMessages([])
+    setLastRequest(null)
+    setLastResponse(null)
+  }
+
+  const handleClearHistory = async () => {
+    // Clear history on backend for current session
+    if (sessionId) {
+      try {
+        await fetch(`/api/chat/history/${sessionId}`, { method: 'DELETE' })
+        await refresh()
+      } catch (error) {
+        console.error('Error clearing history:', error)
+      }
+    }
+    setMessages([])
+    setLastRequest(null)
+    setLastResponse(null)
   }
 
   return (
     <div className="app-container">
-      <SettingsPanel settings={settings} onSettingsChange={setSettings} models={models} onRefreshModels={handleRefreshModels} />
-      <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} requestHistory={requestHistory} />
+      <SettingsPanel 
+        settings={settings} 
+        onSettingsChange={setSettings} 
+        models={models} 
+        onRefreshModels={handleRefreshModels}
+        sessionId={sessionId}
+        onNewChat={handleNewChat}
+        onClearHistory={handleClearHistory}
+      />
+      <DebugPanel lastRequest={lastRequest} lastResponse={lastResponse} requestHistory={backendHistory} />
       <div className="chat-section">
         <div className="chat-header">
           AI Chat
+          {sessionId && (
+            <span className="session-id" title={sessionId}>
+              Session: {sessionId.substring(0, 8)}...
+            </span>
+          )}
         </div>
 
         <div className="chat-messages">
-          {messages.length === 0 ? (
+          {sessionLoading ? (
+            <div className="empty-state">Loading session...</div>
+          ) : messages.length === 0 ? (
             <div className="empty-state">
               Начните чат
             </div>
@@ -206,12 +288,12 @@ function App() {
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Например: Хочу заказать столик на завтра..."
-            disabled={isLoading}
+            disabled={isLoading || sessionLoading}
           />
           <button
             className="send-button"
             onClick={sendMessage}
-            disabled={isLoading || !inputValue.trim()}
+            disabled={isLoading || sessionLoading || !inputValue.trim()}
           >
             {isLoading ? <span className="loading"></span> : 'Отправить'}
           </button>

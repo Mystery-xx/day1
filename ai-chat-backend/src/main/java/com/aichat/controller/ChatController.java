@@ -3,7 +3,11 @@ package com.aichat.controller;
 import com.aichat.dto.ChatRequest;
 import com.aichat.dto.ChatResponse;
 import com.aichat.dto.ModelInfo;
+import com.aichat.dto.ChatMessageDTO;
+import com.aichat.dto.SessionInfoDTO;
+import com.aichat.dto.SessionCreateResponse;
 import com.aichat.service.AiChatService;
+import com.aichat.service.ChatHistoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -30,9 +34,11 @@ public class ChatController {
     private static final Logger logger = LoggerFactory.getLogger(ChatController.class);
 
     private final AiChatService chatService;
+    private final ChatHistoryService historyService;
 
-    public ChatController(AiChatService chatService) {
+    public ChatController(AiChatService chatService, ChatHistoryService historyService) {
         this.chatService = chatService;
+        this.historyService = historyService;
     }
 
     @PostMapping
@@ -51,15 +57,31 @@ public class ChatController {
     public Flux<String> sendMessageStream(@RequestBody ChatRequest request) {
         logger.info("Received streaming chat request");
         
+        // Generate sessionId if not provided
+        String sessionId = request.getSessionId();
+        if (sessionId == null || sessionId.isEmpty()) {
+            sessionId = historyService.createSession();
+        }
+        
+        final String finalSessionId = sessionId;
+        
         ObjectMapper mapper = new ObjectMapper();
         
         return Flux.create(emitter -> {
             try {
-                // Immediately emit debugRequest
+                // Immediately emit debugRequest + sessionId
                 Map<String, Object> debugRequest = chatService.buildDebugRequest(request);
                 logger.debug("Emitting debug request immediately: {}", debugRequest);
-                String debugRequestJson = mapper.writeValueAsString(Map.of("type", "debugRequest", "data", debugRequest));
+                String debugRequestJson = mapper.writeValueAsString(Map.of(
+                    "type", "debugRequest", 
+                    "data", debugRequest,
+                    "sessionId", finalSessionId
+                ));
                 emitter.next(debugRequestJson);
+                
+                // Track start time
+                long startTime = System.currentTimeMillis();
+                final String sessionIdForSave = finalSessionId;
                 
                 // Then call AI API and emit response when ready
                 chatService.sendMessage(request)
@@ -67,8 +89,50 @@ public class ChatController {
                         response -> {
                             try {
                                 logger.debug("Emitting response: {}", response);
-                                // Send full ChatResponse with debug fields included
-                                String responseJson = mapper.writeValueAsString(Map.of("type", "response", "data", response));
+                                
+                                // Save user message to DB
+                                historyService.saveMessage(
+                                    sessionIdForSave,
+                                    "user",
+                                    request.getMessage(),
+                                    null, null, null, null,
+                                    null,
+                                    request.getSettings() != null ? request.getSettings().getProvider() : null,
+                                    request.getSettings() != null ? request.getSettings().getTemperature() : null,
+                                    request.getSettings() != null ? request.getSettings().getMaxTokens() : null
+                                );
+                                
+                                // Save assistant response to DB if successful
+                                if (response.getContent() != null && response.getError() == null) {
+                                    Integer responseTime = (int) (System.currentTimeMillis() - startTime);
+                                    Integer promptTokens = response.getUsage() != null ? 
+                                        (Integer) response.getUsage().get("prompt_tokens") : null;
+                                    Integer completionTokens = response.getUsage() != null ? 
+                                        (Integer) response.getUsage().get("completion_tokens") : null;
+                                    Integer totalTokens = response.getUsage() != null ? 
+                                        (Integer) response.getUsage().get("total_tokens") : null;
+                                    
+                                    historyService.saveMessage(
+                                        sessionIdForSave,
+                                        "assistant",
+                                        response.getContent(),
+                                        response.getModel(),
+                                        promptTokens,
+                                        completionTokens,
+                                        totalTokens,
+                                        responseTime,
+                                        request.getSettings() != null ? request.getSettings().getProvider() : null,
+                                        request.getSettings() != null ? request.getSettings().getTemperature() : null,
+                                        request.getSettings() != null ? request.getSettings().getMaxTokens() : null
+                                    );
+                                }
+                                
+                                // Send full ChatResponse with debug fields + sessionId
+                                String responseJson = mapper.writeValueAsString(Map.of(
+                                    "type", "response", 
+                                    "data", response,
+                                    "sessionId", sessionIdForSave
+                                ));
                                 emitter.next(responseJson);
                                 emitter.complete();
                             } catch (JsonProcessingException e) {
@@ -78,7 +142,11 @@ public class ChatController {
                         error -> {
                             try {
                                 logger.error("Error in streaming call", error);
-                                String errorJson = mapper.writeValueAsString(Map.of("type", "error", "data", Map.of("error", error.getMessage())));
+                                String errorJson = mapper.writeValueAsString(Map.of(
+                                    "type", "error", 
+                                    "data", Map.of("error", error.getMessage()),
+                                    "sessionId", sessionIdForSave
+                                ));
                                 emitter.next(errorJson);
                                 emitter.complete();
                             } catch (JsonProcessingException ex) {
@@ -90,6 +158,42 @@ public class ChatController {
                 emitter.error(e);
             }
         });
+    }
+
+    @GetMapping("/history/{sessionId}")
+    public ResponseEntity<List<ChatMessageDTO>> getSessionHistory(@PathVariable String sessionId) {
+        logger.info("Fetching history for session: {}", sessionId);
+        List<ChatMessageDTO> history = historyService.getSessionHistory(sessionId);
+        return ResponseEntity.ok(history);
+    }
+
+    @DeleteMapping("/history/{sessionId}")
+    public ResponseEntity<Void> deleteSession(@PathVariable String sessionId) {
+        logger.info("Deleting session: {}", sessionId);
+        historyService.deleteSession(sessionId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/history/session")
+    public ResponseEntity<SessionCreateResponse> createSession() {
+        String sessionId = historyService.createSession();
+        return ResponseEntity.ok(new SessionCreateResponse(sessionId));
+    }
+
+    @GetMapping("/sessions")
+    public ResponseEntity<List<SessionInfoDTO>> getAllSessions(
+            @RequestParam(defaultValue = "10") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        logger.info("Fetching sessions: limit={}, offset={}", limit, offset);
+        List<SessionInfoDTO> sessions = historyService.getAllSessions(limit, offset);
+        return ResponseEntity.ok(sessions);
+    }
+
+    @DeleteMapping("/sessions")
+    public ResponseEntity<Void> deleteAllSessions() {
+        logger.info("Deleting all sessions");
+        historyService.deleteAllSessions();
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/health")

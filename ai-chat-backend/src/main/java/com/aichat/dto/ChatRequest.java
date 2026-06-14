@@ -3,6 +3,7 @@ package com.aichat.dto;
 import java.util.List;
 
 public class ChatRequest {
+    private String sessionId;
     private String message;
     private List<Message> history;
     private ModelSettings settings;
@@ -33,6 +34,14 @@ public class ChatRequest {
         public void setContent(String content) {
             this.content = content;
         }
+    }
+
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
     }
 
     public String getMessage() {
