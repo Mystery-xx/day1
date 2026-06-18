@@ -9,6 +9,7 @@ spring:
     name: ai-chat
   webflux:
     max-in-memory-size: 16MB
+  # Primary datasource (H2 - default for backward compatibility)
   datasource:
     url: jdbc:h2:file:/data/chatdb
     driverClassName: org.h2.Driver
@@ -26,6 +27,19 @@ spring:
     properties:
       hibernate:
         format_sql: true
+
+# Additional datasources for multi-datasource support
+datasources:
+  # PostgreSQL for long-term memory
+  postgresql:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/aichat}
+    driverClassName: org.postgresql.Driver
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
+  # SQLite for working memory
+  sqlite:
+    url: jdbc:sqlite:./data/working.db
+    driverClassName: org.sqlite.JDBC
 
 ai:
   api:
@@ -48,3 +62,10 @@ logging:
   level:
     com.aichat: DEBUG
     org.springframework.web: INFO
+
+# Caffeine cache configuration
+spring:
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=30m
