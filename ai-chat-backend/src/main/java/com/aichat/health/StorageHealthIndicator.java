@@ -26,8 +26,8 @@ public class StorageHealthIndicator implements HealthIndicator {
     private final DataSource sqliteDataSource;
 
     public StorageHealthIndicator(DataSource h2DataSource,
-                                  @org.springframework.beans.factory.annotation.Qualifier("postgresqlDataSource") DataSource postgresqlDataSource,
-                                  @org.springframework.beans.factory.annotation.Qualifier("sqliteDataSource") DataSource sqliteDataSource) {
+                                   @org.springframework.beans.factory.annotation.Qualifier("postgresqlDataSource") @org.springframework.beans.factory.annotation.Autowired(required = false) DataSource postgresqlDataSource,
+                                   @org.springframework.beans.factory.annotation.Qualifier("sqliteDataSource") @org.springframework.beans.factory.annotation.Autowired(required = false) DataSource sqliteDataSource) {
         this.h2DataSource = h2DataSource;
         this.postgresqlDataSource = postgresqlDataSource;
         this.sqliteDataSource = sqliteDataSource;

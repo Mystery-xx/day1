@@ -6,7 +6,7 @@ const STRATEGY_OPTIONS = [
   { value: 'stickyFacts', label: 'Sticky Facts', description: 'Inject stored key-value facts as a system message plus recent messages' }
 ]
 
-function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory, sessions, onSessionSelect, onDeleteSession, sessionsLoading, onFactsRefreshed }) {
+function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory, sessions, onSessionSelect, onDeleteSession, sessionsLoading, onFactsRefreshed, profiles, activeProfileId, onProfileActivate, profilesLoading }) {
   const handleChange = (key, value) => {
     onSettingsChange({
       ...settings,
@@ -354,6 +354,51 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
           <div className="setting-description">
             {STRATEGY_OPTIONS.find(o => o.value === (settings.contextStrategy || 'summary'))?.description}
           </div>
+        </div>
+
+        <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
+          <label>Developer Profile</label>
+          <div className="setting-description" style={{ marginBottom: '12px' }}>
+            Выберите стиль ответов AI
+          </div>
+          
+          {profilesLoading ? (
+            <div style={{ padding: '10px', textAlign: 'center', color: '#666' }}>
+              <span className="loading"></span>
+              <span style={{ marginLeft: '8px' }}>Загрузка профилей...</span>
+            </div>
+          ) : profiles && profiles.length > 0 ? (
+            <div className="profile-selector">
+              {profiles.map((profile) => (
+                <div
+                  key={profile.id}
+                  className={`profile-item ${activeProfileId === profile.id ? 'profile-item-active' : ''}`}
+                >
+                  <div className="profile-header">
+                    <div className="profile-name-container">
+                      <span className="profile-name">{profile.profileName}</span>
+                      {activeProfileId === profile.id && (
+                        <span className="profile-active-badge">Active</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="profile-description">{profile.description}</div>
+                  {activeProfileId !== profile.id && (
+                    <button
+                      onClick={() => onProfileActivate(profile.id)}
+                      className="profile-activate-button"
+                    >
+                      Activate
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ padding: '10px', textAlign: 'center', color: '#999', fontSize: '13px' }}>
+              Нет доступных профилей
+            </div>
+          )}
         </div>
 
         {showWindowInput && (

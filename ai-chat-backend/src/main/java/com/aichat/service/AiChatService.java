@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Collections;
+import java.util.stream.Collectors;
 
 @Service
 public class AiChatService {
@@ -279,6 +280,18 @@ public class AiChatService {
         String sessionId = request.getSessionId();
         logger.debug("Building request for session {} with strategy {}", sessionId,
                 requestSettings != null ? requestSettings.getContextStrategy() : "default");
+        
+        // Save sticky facts from request (if provided) - BEFORE strategy is used
+        if (requestSettings != null && requestSettings.getStickyFacts() != null) {
+            logger.info("Saving {} sticky facts from request for session {}", requestSettings.getStickyFacts().size(), sessionId);
+            stickyFactService.saveFacts(sessionId, requestSettings.getStickyFacts());
+        } else {
+            logger.debug("No sticky facts in request for session {} (requestSettings={})", sessionId, requestSettings != null);
+        }
+        
+        boolean hasSystemMessage = false;
+        
+        // Add history from context strategy (may include system message from summary or sticky facts)
         if (sessionId != null && !sessionId.isEmpty() && shouldSendHistory(requestSettings)) {
             ContextStrategyType strategyType = ContextStrategyType.fromString(
                     requestSettings != null ? requestSettings.getContextStrategy() : null);
@@ -289,44 +302,46 @@ public class AiChatService {
                 message.put("role", msg.getRole());
                 message.put("content", msg.getContent());
                 messages.add(message);
+                if ("system".equals(msg.getRole())) {
+                    hasSystemMessage = true;
+                }
             }
         }
 
-        // Add system prompt from active profile (if not Default profile)
-        UserProfile activeProfile = userProfileService.getActiveProfile();
-        if (activeProfile != null && !activeProfile.getPromptTemplate().isBlank()) {
-            // Get working memory (sticky facts)
-            List<com.aichat.entity.StickyFact> stickyFacts = stickyFactService.getFacts(sessionId);
-            
-            // Get short-term memory (history, last 10 messages)
-            List<com.aichat.entity.ChatMessage> recentHistory = historyService.getSessionHistory(sessionId)
-                .stream()
-                .limit(10)
-                .map(this::toEntity)
-                .collect(Collectors.toList());
-            
-            // Build final prompt with all 4 sections
-            String finalPrompt = promptBuilder.buildFinalPrompt(
-                activeProfile,
-                request.getMessage(),
-                stickyFacts,
-                recentHistory
-            );
-            
-            // Add as SYSTEM message at start
-            if (!finalPrompt.isBlank()) {
-                Map<String, String> systemMessage = new HashMap<>();
-                systemMessage.put("role", "system");
-                systemMessage.put("content", finalPrompt);
-                messages.add(0, systemMessage);
+        // Build system prompt: profile + sticky facts ONLY (no history)
+        // Only add if strategy didn't already add a system message
+        if (!hasSystemMessage) {
+            UserProfile activeProfile = userProfileService.getActiveProfile();
+            if (activeProfile != null) {
+                // Get working memory (sticky facts)
+                List<com.aichat.entity.StickyFact> stickyFacts = stickyFactService.getFactsAsEntities(sessionId);
+                
+                // Build system prompt with profile and working memory only
+                String systemPrompt = buildSystemPrompt(activeProfile, stickyFacts);
+                
+                // Add as SYSTEM message at position 0 (MUST be first for AI API)
+                // Create system message if EITHER profile template OR sticky facts exist
+                if (!systemPrompt.isBlank()) {
+                    Map<String, String> systemMessage = new HashMap<>();
+                    systemMessage.put("role", "system");
+                    systemMessage.put("content", systemPrompt);
+                    messages.add(0, systemMessage);
+                }
             }
         }
 
-        // Add current user message
+        // Add current user message LAST
         Map<String, String> userMessage = new HashMap<>();
         userMessage.put("role", "user");
         userMessage.put("content", request.getMessage());
         messages.add(userMessage);
+        
+        // Debug logging: show all messages being sent
+        logger.debug("Messages count: {}", messages.size());
+        for (int i = 0; i < messages.size(); i++) {
+            Map<String, String> msg = messages.get(i);
+            logger.debug("Message {}: role={}", i, msg.get("role"));
+        }
 
         Map<String, Object> requestBody = new HashMap<>();
         
@@ -582,6 +597,41 @@ public class AiChatService {
             String fallback = existingSummary != null ? existingSummary : "Previous conversation history available.";
             return new SummaryResult(fallback, null, null);
         }
+    }
+
+    /**
+     * Build system prompt with profile and working memory (sticky facts) only.
+     * Does NOT include history - history goes in messages array.
+     */
+    private String buildSystemPrompt(UserProfile profile, List<com.aichat.entity.StickyFact> stickyFacts) {
+        StringBuilder systemPrompt = new StringBuilder();
+        
+        // Profile section
+        if (profile.getPromptTemplate() != null && !profile.getPromptTemplate().isBlank()) {
+            systemPrompt.append(profile.getPromptTemplate()).append("\n\n");
+        }
+        if (profile.getLanguage() != null && !profile.getLanguage().isBlank()) {
+            systemPrompt.append("Язык: ").append(profile.getLanguage()).append("\n\n");
+        }
+        if (profile.getCommunicationStyle() != null && !profile.getCommunicationStyle().isBlank()) {
+            systemPrompt.append("Стиль: ").append(profile.getCommunicationStyle()).append("\n\n");
+        }
+        
+        // Working memory section (sticky facts)
+        if (stickyFacts != null && !stickyFacts.isEmpty()) {
+            systemPrompt.append("=== РАБОЧАЯ ПАМЯТЬ (контекст проекта) ===\n");
+            Map<String, String> factMap = stickyFacts.stream()
+                .collect(Collectors.toMap(
+                    com.aichat.entity.StickyFact::getFactKey,
+                    com.aichat.entity.StickyFact::getFactValue,
+                    (existing, replacement) -> replacement
+                ));
+            for (Map.Entry<String, String> entry : factMap.entrySet()) {
+                systemPrompt.append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+            }
+        }
+        
+        return systemPrompt.toString().trim();
     }
 
     /**

@@ -3,6 +3,7 @@ package com.aichat.builder;
 import com.aichat.entity.ChatMessage;
 import com.aichat.entity.StickyFact;
 import com.aichat.entity.UserProfile;
+import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -15,6 +16,7 @@ import java.util.stream.Collectors;
  * 
  * Supports template-based prompt generation with variable substitution.
  */
+@Component
 public class PromptBuilder {
 
     private static final int DEFAULT_SHORT_TERM_MEMORY_LIMIT = 10;

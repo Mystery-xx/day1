@@ -51,6 +51,17 @@ public class StickyFactService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Get sticky facts as entities (for internal use by PromptBuilder).
+     * @param sessionId session ID
+     * @return list of StickyFact entities
+     */
+    public List<StickyFact> getFactsAsEntities(String sessionId) {
+        return repository.findBySessionIdOrderByFactKeyAsc(sessionId)
+                .stream()
+                .collect(Collectors.toList());
+    }
+
     public Map<String, String> getFactsAsMap(String sessionId) {
         return repository.findBySessionIdOrderByFactKeyAsc(sessionId)
                 .stream()

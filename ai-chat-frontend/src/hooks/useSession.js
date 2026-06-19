@@ -49,6 +49,12 @@ export function useSession() {
         const data = await response.json();
         setSessionId(data.sessionId);
         localStorage.setItem(SESSION_KEY, data.sessionId);
+
+        // Clear sticky facts for new session (ignore errors)
+        await fetch(`/api/chat/sessions/${data.sessionId}/sticky-facts`, {
+          method: 'DELETE'
+        }).catch(() => {});
+
         return data.sessionId;
       }
     } catch (error) {

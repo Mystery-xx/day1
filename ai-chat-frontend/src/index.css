@@ -718,3 +718,86 @@ body {
   font-weight: 600;
   margin-right: 6px;
 }
+
+/* Developer Profile Selector */
+.profile-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-item {
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  border: 2px solid #e0e0e0;
+  transition: all 0.2s ease;
+}
+
+.profile-item:hover {
+  border-color: #bbb;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.profile-item-active {
+  border-color: #4CAF50;
+  background: #f0f9f0;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.15);
+}
+
+.profile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.profile-name-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.profile-active-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4CAF50;
+  background: #e8f5e9;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid #4CAF50;
+}
+
+.profile-description {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.profile-activate-button {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid #667eea;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  transition: all 0.2s ease;
+}
+
+.profile-activate-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.profile-activate-button:active {
+  transform: translateY(0);
+}

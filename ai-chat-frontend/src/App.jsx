@@ -15,6 +15,7 @@ function App() {
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
   const [stickyFactsList, setStickyFactsList] = useState([])
+  const [recentHistory, setRecentHistory] = useState([])
   
   const { sessionId, isLoading: sessionLoading, createNewSession, clearSession } = useSession()
   const { history: backendHistory, addEntry, refresh } = useChatHistory(sessionId)
@@ -46,6 +47,8 @@ function App() {
     return defaults
   })
   const [models, setModels] = useState([])
+  const [profiles, setProfiles] = useState([])
+  const [activeProfileId, setActiveProfileId] = useState(null)
 
   const messagesEndRef = useRef(null)
 
@@ -76,9 +79,41 @@ function App() {
     fetchSessions()
   }, [sessionId, fetchSessions])
 
-  // Load sticky facts when session or strategy changes
+  // Load profiles on mount (global, not per-session)
   useEffect(() => {
-    if (sessionId && settings.contextStrategy === 'stickyFacts') {
+    let cancelled = false
+    fetch('/api/chat/profiles')
+      .then(res => res.ok ? res.json() : Promise.resolve([]))
+      .then(data => {
+        if (cancelled) return
+        setProfiles(data)
+        // Set active profile to first one if none selected (fallback)
+        if (data && data.length > 0 && !activeProfileId) {
+          const defaultProfile = data.find(p => p.promptTemplate === '') || data[0]
+          setActiveProfileId(defaultProfile.id)
+        }
+      })
+      .catch(() => setProfiles([]))
+    
+    // Fetch active profile from backend to sync UI with backend state
+    fetch('/api/chat/profiles/active')
+      .then(res => res.ok ? res.json() : null)
+      .then(active => {
+        if (cancelled) return
+        if (active && active.id) {
+          setActiveProfileId(active.id)
+        }
+      })
+      .catch(() => {
+        // Fallback to existing logic if API fails
+      })
+    
+    return () => { cancelled = true }
+  }, [])
+
+  // Load sticky facts when session changes (for long-term memory display)
+  useEffect(() => {
+    if (sessionId) {
       fetch(`/api/chat/sessions/${sessionId}/sticky-facts`)
         .then(res => res.ok ? res.json() : Promise.resolve([]))
         .then(facts => setStickyFactsList(facts))
@@ -86,7 +121,17 @@ function App() {
     } else {
       setStickyFactsList([])
     }
-  }, [sessionId, settings.contextStrategy])
+  }, [sessionId])
+
+  // Load recent history when session changes OR when history is updated (last 10 messages)
+  useEffect(() => {
+    if (sessionId && backendHistory.length > 0) {
+      // Use backendHistory directly instead of fetching from API
+      setRecentHistory(backendHistory.slice(-10))
+    } else {
+      setRecentHistory([])
+    }
+  }, [sessionId, backendHistory])
 
   // Function to manually refresh sticky facts (called after manual extraction)
   const refreshStickyFacts = async () => {
@@ -169,6 +214,7 @@ function App() {
         message: userMessage.content,
         settings: {
           ...settingsWithoutStop,
+          stickyFacts: settings.stickyFacts || {},
           // Only include stop if it has values
           ...(stop && stop.length > 0 ? { stop } : {})
         }
@@ -344,6 +390,21 @@ function App() {
     }
   }
 
+  const handleProfileActivate = async (profileId) => {
+    try {
+      const response = await fetch(`/api/chat/profiles/${profileId}/activate`, {
+        method: 'POST'
+      })
+      if (response.ok) {
+        setActiveProfileId(profileId)
+      }
+    } catch (error) {
+      console.error('Error activating profile:', error)
+    }
+  }
+
+  const activeProfile = profiles.find(p => p.id === activeProfileId) || null
+
   return (
     <div className="app-container">
       <SettingsPanel 
@@ -359,6 +420,9 @@ function App() {
         onDeleteSession={handleDeleteSession}
         sessionsLoading={sessionsLoading}
         onFactsRefreshed={refreshStickyFacts}
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        onProfileActivate={handleProfileActivate}
       />
       <DebugPanel 
         lastRequest={lastRequest} 
@@ -366,6 +430,8 @@ function App() {
         requestHistory={backendHistory}
         stickyFactsList={stickyFactsList}
         contextStrategy={settings.contextStrategy}
+        activeProfile={activeProfile}
+        recentHistory={recentHistory}
       />
       <div className="chat-section">
         <div className="chat-header">

@@ -43,14 +43,6 @@ public class StickyFactsContextStrategy implements ContextStrategy {
 
         List<ChatMessageDTO> result = new ArrayList<>();
 
-        if (!facts.isEmpty()) {
-            ChatMessageDTO systemMessage = new ChatMessageDTO();
-            systemMessage.setSessionId(sessionId);
-            systemMessage.setRole("system");
-            systemMessage.setContent(buildFactsContent(facts));
-            result.add(systemMessage);
-        }
-
         List<ChatMessageDTO> history = historyService.getSessionHistory(sessionId);
         if (history.size() > windowSize) {
             result.addAll(history.subList(history.size() - windowSize, history.size()));
