@@ -1,5 +1,6 @@
 package com.aichat.service;
 
+import com.aichat.builder.PromptBuilder;
 import com.aichat.config.AiChatProperties;
 import com.aichat.context.ContextStrategy;
 import com.aichat.context.ContextStrategyFactory;
@@ -9,6 +10,8 @@ import com.aichat.dto.ChatResponse;
 import com.aichat.dto.ModelInfo;
 import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SummaryResult;
+import com.aichat.entity.UserProfile;
+import com.aichat.service.UserProfileService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -40,13 +43,20 @@ public class AiChatService {
     private final ObjectMapper objectMapper;
     private final ChatHistoryService historyService;
     private final ContextStrategyFactory contextStrategyFactory;
+    private final StickyFactService stickyFactService;
+    private final UserProfileService userProfileService;
+    private final PromptBuilder promptBuilder;
 
     public AiChatService(AiChatProperties properties, ChatHistoryService historyService,
-                         ContextStrategyFactory contextStrategyFactory) {
+                         ContextStrategyFactory contextStrategyFactory, StickyFactService stickyFactService,
+                         UserProfileService userProfileService, PromptBuilder promptBuilder) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         this.historyService = historyService;
         this.contextStrategyFactory = contextStrategyFactory;
+        this.stickyFactService = stickyFactService;
+        this.userProfileService = userProfileService;
+        this.promptBuilder = promptBuilder;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(120));
@@ -282,6 +292,36 @@ public class AiChatService {
             }
         }
 
+        // Add system prompt from active profile (if not Default profile)
+        UserProfile activeProfile = userProfileService.getActiveProfile();
+        if (activeProfile != null && !activeProfile.getPromptTemplate().isBlank()) {
+            // Get working memory (sticky facts)
+            List<com.aichat.entity.StickyFact> stickyFacts = stickyFactService.getFacts(sessionId);
+            
+            // Get short-term memory (history, last 10 messages)
+            List<com.aichat.entity.ChatMessage> recentHistory = historyService.getSessionHistory(sessionId)
+                .stream()
+                .limit(10)
+                .map(this::toEntity)
+                .collect(Collectors.toList());
+            
+            // Build final prompt with all 4 sections
+            String finalPrompt = promptBuilder.buildFinalPrompt(
+                activeProfile,
+                request.getMessage(),
+                stickyFacts,
+                recentHistory
+            );
+            
+            // Add as SYSTEM message at start
+            if (!finalPrompt.isBlank()) {
+                Map<String, String> systemMessage = new HashMap<>();
+                systemMessage.put("role", "system");
+                systemMessage.put("content", finalPrompt);
+                messages.add(0, systemMessage);
+            }
+        }
+
         // Add current user message
         Map<String, String> userMessage = new HashMap<>();
         userMessage.put("role", "user");
@@ -399,6 +439,8 @@ public class AiChatService {
                 sessionId, allMessages, startIndex, endIndex, provider, model, existingSummary);
             if (result != null && result.getSummaryText() != null) {
                 historyService.generateAndSaveSummary(sessionId, historyLimit, result.getSummaryText(), endIndex - 1);
+                stickyFactService.saveFact(sessionId, "conversation_summary", result.getSummaryText());
+                
                 logger.info("{} summary for session {}: indices {}-{}, {} characters",
                     existingSummary == null ? "Generated" : "Updated",
                     sessionId, startIndex, endIndex - 1, result.getSummaryText().length());
@@ -540,6 +582,31 @@ public class AiChatService {
             String fallback = existingSummary != null ? existingSummary : "Previous conversation history available.";
             return new SummaryResult(fallback, null, null);
         }
+    }
+
+    /**
+     * Convert ChatMessageDTO to ChatMessage entity.
+     */
+    private com.aichat.entity.ChatMessage toEntity(ChatMessageDTO dto) {
+        if (dto == null) {
+            return null;
+        }
+        com.aichat.entity.ChatMessage entity = new com.aichat.entity.ChatMessage();
+        entity.setId(dto.getId());
+        entity.setSessionId(dto.getSessionId());
+        entity.setRole(com.aichat.entity.ChatMessage.Role.valueOf(dto.getRole().toUpperCase()));
+        entity.setContent(dto.getContent());
+        entity.setModel(dto.getModel());
+        entity.setPromptTokens(dto.getPromptTokens());
+        entity.setCompletionTokens(dto.getCompletionTokens());
+        entity.setTotalTokens(dto.getTotalTokens());
+        entity.setResponseTimeMs(dto.getResponseTimeMs());
+        entity.setProvider(dto.getProvider());
+        entity.setTemperature(dto.getTemperature());
+        entity.setMaxTokens(dto.getMaxTokens());
+        entity.setCreatedAt(dto.getCreatedAt());
+        entity.setSummary(dto.getSummary());
+        return entity;
     }
 
 }
