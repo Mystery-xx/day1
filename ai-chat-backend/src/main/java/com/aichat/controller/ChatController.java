@@ -7,10 +7,15 @@ import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SessionInfoDTO;
 import com.aichat.dto.SessionCreateResponse;
 import com.aichat.dto.StickyFactDTO;
+import com.aichat.dto.TaskStateDTO;
+import com.aichat.dto.TaskContext;
 import com.aichat.service.AiChatService;
 import com.aichat.service.ChatHistoryService;
 import com.aichat.service.StickyFactService;
 import com.aichat.service.FactExtractionService;
+import com.aichat.service.TaskOrchestrator;
+import com.aichat.agent.TaskAgent;
+import com.aichat.enums.TaskState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -41,13 +46,16 @@ public class ChatController {
     private final ChatHistoryService historyService;
     private final StickyFactService stickyFactService;
     private final FactExtractionService factExtractionService;
+    private final TaskOrchestrator orchestrator;
 
     public ChatController(AiChatService chatService, ChatHistoryService historyService,
-                          StickyFactService stickyFactService, FactExtractionService factExtractionService) {
+                          StickyFactService stickyFactService, FactExtractionService factExtractionService,
+                          TaskOrchestrator orchestrator) {
         this.chatService = chatService;
         this.historyService = historyService;
         this.stickyFactService = stickyFactService;
         this.factExtractionService = factExtractionService;
+        this.orchestrator = orchestrator;
     }
 
     @PostMapping
@@ -75,10 +83,33 @@ public class ChatController {
         
         final String finalSessionId = sessionId;
         
+        try {
+            historyService.getSessionHistory(sessionId);
+        } catch (IllegalArgumentException e) {
+            logger.info("Session not found, auto-creating: {}", sessionId);
+            historyService.createSession();
+        }
+        
         ObjectMapper mapper = new ObjectMapper();
         
         return Flux.create(emitter -> {
             try {
+                String agentSystemPrompt = null;
+                try {
+                    ChatMessageDTO userMessage = new ChatMessageDTO("user", request.getMessage());
+                    TaskContext taskContext = orchestrator.processMessage(finalSessionId, userMessage);
+                    TaskAgent currentAgent = orchestrator.getCurrentAgent(finalSessionId);
+                    agentSystemPrompt = currentAgent.getSystemPrompt();
+                    TaskState currentState = orchestrator.getContext(finalSessionId).getCurrentState();
+                    
+                    logger.info("State Machine: Agent={}, State={}, SystemPromptLength={}",
+                        currentAgent.getClass().getSimpleName(),
+                        currentState.getDisplayName(),
+                        agentSystemPrompt != null ? agentSystemPrompt.length() : 0);
+                } catch (Exception smEx) {
+                    logger.warn("State Machine processing failed, using direct chat: {}", smEx.getMessage());
+                }
+                
                 // Immediately emit debugRequest + sessionId
                 Map<String, Object> debugRequest = chatService.buildDebugRequest(request);
                 
@@ -95,7 +126,7 @@ public class ChatController {
                 final String sessionIdForSave = finalSessionId;
                 
                 // Then call AI API and emit response when ready
-                chatService.sendMessage(request)
+                chatService.sendMessage(request, agentSystemPrompt)
                     .publishOn(Schedulers.boundedElastic())
                     .subscribe(
                         response -> {
@@ -351,5 +382,36 @@ public class ChatController {
         
         Map<String, String> extractedFacts = factExtractionService.extractAndSaveFacts(sessionId, model, provider);
         return ResponseEntity.ok(extractedFacts);
+    }
+
+    @GetMapping("/sessions/{sessionId}/state")
+    public ResponseEntity<TaskStateDTO> getSessionState(@PathVariable String sessionId) {
+        logger.info("Fetching state for session: {}", sessionId);
+        try {
+            TaskContext context = orchestrator.getContext(sessionId);
+            if (context == null || context.getCurrentState() == null) {
+                logger.warn("Session context or state not found: {}", sessionId);
+                // Return default PLANNING state for sessions without task context
+                TaskState defaultState = TaskState.PLANNING;
+                TaskStateDTO stateDTO = new TaskStateDTO(
+                    defaultState.name(),
+                    defaultState.getDisplayName(),
+                    defaultState.getOrder(),
+                    defaultState.getAgentClass()
+                );
+                return ResponseEntity.ok(stateDTO);
+            }
+            TaskState taskState = context.getCurrentState();
+            TaskStateDTO stateDTO = new TaskStateDTO(
+                taskState.name(),
+                taskState.getDisplayName(),
+                taskState.getOrder(),
+                taskState.getAgentClass()
+            );
+            return ResponseEntity.ok(stateDTO);
+        } catch (IllegalArgumentException e) {
+            logger.warn("Session not found: {}", sessionId);
+            return ResponseEntity.notFound().build();
+        }
     }
 }
