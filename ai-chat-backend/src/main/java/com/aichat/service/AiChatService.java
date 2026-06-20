@@ -69,10 +69,23 @@ public class AiChatService {
                 .build();
     }
 
-    public Mono<ChatResponse> sendMessage(ChatRequest request) {
-        logger.debug("Sending message to AI: {}", request.getMessage());
-
-        Map<String, Object> requestBody = buildRequestBody(request);
+        /**
+         * Send message to AI API with optional custom system prompt.
+         * Used by State Machine agents to pass their specific system prompts.
+         */
+        public Mono<ChatResponse> sendMessage(ChatRequest request) {
+            return sendMessage(request, null);
+        }
+        
+        /**
+         * Send message to AI API with custom system prompt.
+         * @param request Chat request with message and settings
+         * @param systemPrompt Custom system prompt (if null, uses profile/sticky facts)
+         */
+        public Mono<ChatResponse> sendMessage(ChatRequest request, String systemPrompt) {
+            logger.debug("Sending message to AI: {}", request.getMessage());
+    
+            Map<String, Object> requestBody = buildRequestBody(request, systemPrompt);
         
         String provider = request.getSettings() != null ? request.getSettings().getProvider() : properties.getProvider();
         String baseUrl = getBaseUrlForProvider(provider);
@@ -135,9 +148,9 @@ public class AiChatService {
                 });
     }
 
-    public Map<String, Object> buildDebugRequest(ChatRequest request) {
-        return buildRequestBody(request);
-    }
+        public Map<String, Object> buildDebugRequest(ChatRequest request) {
+            return buildRequestBody(request, null);
+        }
 
     private boolean shouldSendHistory(ChatRequest.ModelSettings requestSettings) {
         if (requestSettings == null) {
@@ -268,67 +281,88 @@ public class AiChatService {
         return "medium";
     }
 
-    private Map<String, Object> buildRequestBody(ChatRequest request) {
-        List<Map<String, String>> messages = new ArrayList<>();
-
-        ChatRequest.ModelSettings requestSettings = request.getSettings();
-        String model = (requestSettings != null && requestSettings.getModel() != null)
-            ? requestSettings.getModel()
-            : properties.getModel();
-        String provider = requestSettings != null ? requestSettings.getProvider() : null;
-
-        String sessionId = request.getSessionId();
-        logger.debug("Building request for session {} with strategy {}", sessionId,
-                requestSettings != null ? requestSettings.getContextStrategy() : "default");
-        
-        // Save sticky facts from request (if provided) - BEFORE strategy is used
-        if (requestSettings != null && requestSettings.getStickyFacts() != null) {
-            logger.info("Saving {} sticky facts from request for session {}", requestSettings.getStickyFacts().size(), sessionId);
-            stickyFactService.saveFacts(sessionId, requestSettings.getStickyFacts());
-        } else {
-            logger.debug("No sticky facts in request for session {} (requestSettings={})", sessionId, requestSettings != null);
-        }
-        
-        boolean hasSystemMessage = false;
-        
-        // Add history from context strategy (may include system message from summary or sticky facts)
-        if (sessionId != null && !sessionId.isEmpty() && shouldSendHistory(requestSettings)) {
-            ContextStrategyType strategyType = ContextStrategyType.fromString(
-                    requestSettings != null ? requestSettings.getContextStrategy() : null);
-            ContextStrategy strategy = contextStrategyFactory.createStrategy(strategyType);
-            List<ChatMessageDTO> history = strategy.buildContext(sessionId, requestSettings);
-            for (var msg : history) {
-                Map<String, String> message = new HashMap<>();
-                message.put("role", msg.getRole());
-                message.put("content", msg.getContent());
-                messages.add(message);
-                if ("system".equals(msg.getRole())) {
-                    hasSystemMessage = true;
+        /**
+         * Build request body for AI API call.
+         * @param request Chat request
+         * @param customSystemPrompt Optional custom system prompt (for State Machine agents)
+         *                           If null, uses profile/sticky facts as usual
+         */
+        private Map<String, Object> buildRequestBody(ChatRequest request, String customSystemPrompt) {
+            List<Map<String, String>> messages = new ArrayList<>();
+    
+            ChatRequest.ModelSettings requestSettings = request.getSettings();
+            String model = (requestSettings != null && requestSettings.getModel() != null)
+                ? requestSettings.getModel()
+                : properties.getModel();
+            String provider = requestSettings != null ? requestSettings.getProvider() : null;
+    
+            String sessionId = request.getSessionId();
+            logger.debug("Building request for session {} with strategy {}", sessionId,
+                    requestSettings != null ? requestSettings.getContextStrategy() : "default");
+            
+            // Save sticky facts from request (if provided) - BEFORE strategy is used
+            if (requestSettings != null && requestSettings.getStickyFacts() != null) {
+                logger.info("Saving {} sticky facts from request for session {}", requestSettings.getStickyFacts().size(), sessionId);
+                stickyFactService.saveFacts(sessionId, requestSettings.getStickyFacts());
+            } else {
+                logger.debug("No sticky facts in request for session {} (requestSettings={})", sessionId, requestSettings != null);
+            }
+            
+            boolean hasSystemMessage = false;
+            
+            // Add custom system prompt if provided (for State Machine agents)
+            if (customSystemPrompt != null && !customSystemPrompt.isBlank()) {
+                Map<String, String> systemMessage = new HashMap<>();
+                systemMessage.put("role", "system");
+                systemMessage.put("content", customSystemPrompt);
+                messages.add(systemMessage);
+                hasSystemMessage = true;
+                logger.debug("Using custom system prompt: {} chars", customSystemPrompt.length());
+            }
+            
+            // Add history from context strategy (may include system message from summary or sticky facts)
+            if (sessionId != null && !sessionId.isEmpty() && shouldSendHistory(requestSettings)) {
+                ContextStrategyType strategyType = ContextStrategyType.fromString(
+                        requestSettings != null ? requestSettings.getContextStrategy() : null);
+                ContextStrategy strategy = contextStrategyFactory.createStrategy(strategyType);
+                List<ChatMessageDTO> history = strategy.buildContext(sessionId, requestSettings);
+                for (var msg : history) {
+                    // Skip system messages from history when custom system prompt is provided (State Machine agents)
+                    if (customSystemPrompt != null && "system".equals(msg.getRole())) {
+                        logger.debug("Skipping system message from history - using custom system prompt");
+                        continue;
+                    }
+                    Map<String, String> message = new HashMap<>();
+                    message.put("role", msg.getRole());
+                    message.put("content", msg.getContent());
+                    messages.add(message);
+                    if ("system".equals(msg.getRole())) {
+                        hasSystemMessage = true;
+                    }
                 }
             }
-        }
-
-        // Build system prompt: profile + sticky facts ONLY (no history)
-        // Only add if strategy didn't already add a system message
-        if (!hasSystemMessage) {
-            UserProfile activeProfile = userProfileService.getActiveProfile();
-            if (activeProfile != null) {
-                // Get working memory (sticky facts)
-                List<com.aichat.entity.StickyFact> stickyFacts = stickyFactService.getFactsAsEntities(sessionId);
-                
-                // Build system prompt with profile and working memory only
-                String systemPrompt = buildSystemPrompt(activeProfile, stickyFacts);
-                
-                // Add as SYSTEM message at position 0 (MUST be first for AI API)
-                // Create system message if EITHER profile template OR sticky facts exist
-                if (!systemPrompt.isBlank()) {
-                    Map<String, String> systemMessage = new HashMap<>();
-                    systemMessage.put("role", "system");
-                    systemMessage.put("content", systemPrompt);
-                    messages.add(0, systemMessage);
+    
+            // Build system prompt: profile + sticky facts ONLY (no history)
+            // Only add if NO custom system prompt and strategy didn't already add a system message
+            if (!hasSystemMessage) {
+                UserProfile activeProfile = userProfileService.getActiveProfile();
+                if (activeProfile != null) {
+                    // Get working memory (sticky facts)
+                    List<com.aichat.entity.StickyFact> stickyFacts = stickyFactService.getFactsAsEntities(sessionId);
+                    
+                    // Build system prompt with profile and working memory only
+                    String systemPrompt = buildSystemPrompt(activeProfile, stickyFacts);
+                    
+                    // Add as SYSTEM message at position 0 (MUST be first for AI API)
+                    // Create system message if EITHER profile template OR sticky facts exist
+                    if (!systemPrompt.isBlank()) {
+                        Map<String, String> systemMessage = new HashMap<>();
+                        systemMessage.put("role", "system");
+                        systemMessage.put("content", systemPrompt);
+                        messages.add(0, systemMessage);
+                    }
                 }
             }
-        }
 
         // Add current user message LAST
         Map<String, String> userMessage = new HashMap<>();

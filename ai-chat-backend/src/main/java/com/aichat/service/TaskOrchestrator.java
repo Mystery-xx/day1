@@ -136,7 +136,7 @@ public class TaskOrchestrator {
      * Get the current context for a session.
      * 
      * @param sessionId Session ID
-     * @return Current task context, or null if not found
+     * @return Current task context, or null if session not found
      */
     public TaskContext getContext(String sessionId) {
         ChatSession session = sessionRepository.findBySessionId(sessionId).orElse(null);
@@ -146,9 +146,8 @@ public class TaskOrchestrator {
             return null;
         }
         
-        return contextRepository.findBySessionId(session.getId())
-            .map(TaskContext::fromEntity)
-            .orElse(null);
+        // Load context from DB or create new one if not exists
+        return loadOrCreateContext(session);
     }
     
     /**

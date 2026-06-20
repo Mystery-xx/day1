@@ -143,7 +143,7 @@ public class UserProfileService {
                 .communicationStyle(communicationStyle)
                 .description(description)
                 .isActive(isActive)
-                .user(null)
+
                 .build();
             repository.save(profile);
         }

@@ -21,6 +21,11 @@ public class ChatMessageDTO {
     public ChatMessageDTO() {
     }
     
+    public ChatMessageDTO(String role, String content) {
+        this.role = role;
+        this.content = content;
+    }
+    
     public Long getId() {
         return id;
     }

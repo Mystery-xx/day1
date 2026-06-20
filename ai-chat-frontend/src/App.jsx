@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
+import StatePanel from './components/StatePanel'
 import { Message } from './components/Message'
 import { useSession } from './hooks/useSession'
 import { useChatHistory } from './hooks/useChatHistory'
@@ -49,6 +50,7 @@ function App() {
   const [models, setModels] = useState([])
   const [profiles, setProfiles] = useState([])
   const [activeProfileId, setActiveProfileId] = useState(null)
+  const [taskState, setTaskState] = useState('PLANNING')
 
   const messagesEndRef = useRef(null)
 
@@ -132,6 +134,30 @@ function App() {
       setRecentHistory([])
     }
   }, [sessionId, backendHistory])
+
+  useEffect(() => {
+    if (!sessionId) {
+      setTaskState('PLANNING')
+      return
+    }
+
+    const fetchTaskState = async () => {
+      try {
+        const response = await fetch(`/api/chat/sessions/${sessionId}/state`)
+        if (response.ok) {
+          const data = await response.json()
+          setTaskState(data.state)
+        }
+      } catch (error) {
+        console.error('Error fetching task state:', error)
+      }
+    }
+
+    fetchTaskState()
+    const interval = setInterval(fetchTaskState, 5000)
+
+    return () => clearInterval(interval)
+  }, [sessionId])
 
   // Function to manually refresh sticky facts (called after manual extraction)
   const refreshStickyFacts = async () => {
@@ -434,6 +460,7 @@ function App() {
         recentHistory={recentHistory}
       />
       <div className="chat-section">
+        <StatePanel currentState={taskState} />
         <div className="chat-header">
           AI Chat
           {sessionId && (

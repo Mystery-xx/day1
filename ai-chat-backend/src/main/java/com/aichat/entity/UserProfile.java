@@ -14,9 +14,8 @@ import java.time.Instant;
  * language preferences, and communication styles.
  */
 @Entity
-@Table(name = "user_profile", indexes = {
-    @Index(name = "idx_user_profile_name", columnList = "profileName"),
-    @Index(name = "idx_user_profile_user_id", columnList = "user_id")
+@Table(name = "developer_profile", indexes = {
+    @Index(name = "idx_user_profile_name", columnList = "profileName")
 })
 @Data
 @NoArgsConstructor
@@ -45,10 +44,6 @@ public class UserProfile {
 
     @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT TRUE")
     private Boolean isActive = true;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id")
-    private User user;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;

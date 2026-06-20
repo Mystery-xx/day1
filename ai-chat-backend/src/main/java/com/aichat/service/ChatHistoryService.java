@@ -3,7 +3,10 @@ package com.aichat.service;
 import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SessionInfoDTO;
 import com.aichat.entity.ChatMessage;
+import com.aichat.entity.ChatSession;
+import com.aichat.enums.TaskState;
 import com.aichat.repository.ChatMessageRepository;
+import com.aichat.repository.ChatSessionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,13 +21,23 @@ import java.util.stream.Collectors;
 public class ChatHistoryService {
     
     private final ChatMessageRepository repository;
+    private final ChatSessionRepository sessionRepository;
     
-    public ChatHistoryService(ChatMessageRepository repository) {
+    public ChatHistoryService(ChatMessageRepository repository, ChatSessionRepository sessionRepository) {
         this.repository = repository;
+        this.sessionRepository = sessionRepository;
     }
     
     public String createSession() {
-        return UUID.randomUUID().toString();
+        String sessionId = UUID.randomUUID().toString();
+        
+        ChatSession session = new ChatSession();
+        session.setSessionId(sessionId);
+        session.setTaskState(TaskState.PLANNING);
+        session.setCreatedAt(Instant.now());
+        sessionRepository.save(session);
+        
+        return sessionId;
     }
     
     public List<ChatMessageDTO> getSessionHistory(String sessionId) {
