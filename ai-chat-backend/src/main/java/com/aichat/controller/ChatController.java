@@ -97,13 +97,18 @@ public class ChatController {
         ObjectMapper mapper = new ObjectMapper();
         
         return Flux.create(emitter -> {
+            TaskAgent currentAgent = null;
             try {
                 String agentSystemPrompt = null;
                 try {
                     ChatMessageDTO userMessage = new ChatMessageDTO("user", request.getMessage());
                     TaskContext taskContext = orchestrator.processMessage(finalSessionId, userMessage);
-                    TaskAgent currentAgent = orchestrator.getCurrentAgent(finalSessionId);
+                    
+                    // Get system prompt AFTER processMessage - this ensures we get the correct agent's prompt
+                    // (e.g., after auto-transition PLANNING→EXECUTION, we get ExecutionAgent's prompt, not PlanningAgent's)
+                    currentAgent = orchestrator.getCurrentAgent(finalSessionId);
                     agentSystemPrompt = currentAgent.getSystemPrompt();
+                    
                     TaskState currentState = orchestrator.getContext(finalSessionId).getCurrentState();
                     
                     logger.info("State Machine: Agent={}, State={}, SystemPromptLength={}",
@@ -125,10 +130,23 @@ public class ChatController {
                     emitter.next(stateUpdateJson);
                 } catch (Exception smEx) {
                     logger.warn("State Machine processing failed, using direct chat: {}", smEx.getMessage());
+                    // Fallback: try to get system prompt from current agent even after failure
+                    if (agentSystemPrompt == null) {
+                        try {
+                            TaskAgent fallbackAgent = orchestrator.getCurrentAgent(finalSessionId);
+                            if (fallbackAgent != null) {
+                                agentSystemPrompt = fallbackAgent.getSystemPrompt();
+                                logger.info("Fallback: got system prompt from agent: {}",
+                                    fallbackAgent.getClass().getSimpleName());
+                            }
+                        } catch (Exception fallbackEx) {
+                            logger.warn("Could not get fallback system prompt: {}", fallbackEx.getMessage());
+                        }
+                    }
                 }
                 
-                // Immediately emit debugRequest + sessionId
-                Map<String, Object> debugRequest = chatService.buildDebugRequest(request);
+                // Immediately emit debugRequest + sessionId (with system prompt for debug)
+                Map<String, Object> debugRequest = chatService.buildDebugRequest(request, agentSystemPrompt);
                 
                 logger.debug("Emitting debug request immediately: {}", debugRequest);
                 String debugRequestJson = mapper.writeValueAsString(Map.of(
@@ -406,6 +424,7 @@ public class ChatController {
         logger.info("Fetching state for session: {}", sessionId);
         try {
             TaskContext context = orchestrator.getContext(sessionId);
+            logger.info("Current state: {}", context.getCurrentState().getDisplayName());
             if (context == null || context.getCurrentState() == null) {
                 logger.warn("Session context or state not found: {}", sessionId);
                 // Return default PLANNING state for sessions without task context

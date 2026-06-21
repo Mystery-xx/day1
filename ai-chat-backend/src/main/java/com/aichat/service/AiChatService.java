@@ -149,7 +149,11 @@ public class AiChatService {
     }
 
         public Map<String, Object> buildDebugRequest(ChatRequest request) {
-            return buildRequestBody(request, null);
+            return buildDebugRequest(request, null);
+        }
+        
+        public Map<String, Object> buildDebugRequest(ChatRequest request, String systemPrompt) {
+            return buildRequestBody(request, systemPrompt);
         }
 
     private boolean shouldSendHistory(ChatRequest.ModelSettings requestSettings) {
