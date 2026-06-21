@@ -126,6 +126,40 @@ public class TaskOrchestrator {
         if (nextState.isPresent()) {
             TaskState targetState = nextState.get();
             logger.debug("Executing transition {} -> {}", session.getTaskState(), targetState);
+            
+            // Auto-transition PLANNING → EXECUTION: invoke ExecutionAgent immediately
+            if (session.getTaskState() == TaskState.PLANNING && targetState == TaskState.EXECUTION) {
+                // 1. Save plan in context
+                updatedContext = updatedContext.withPlan(result.getContent());
+                
+                // 2. Transition to EXECUTION
+                transitionToInternal(session, TaskState.EXECUTION, "Plan approved by user");
+                updatedContext = updatedContext.withState(TaskState.EXECUTION);
+                
+                // 3. Invoke ExecutionAgent immediately (same request)
+                TaskAgent executionAgent = getAgentForState(TaskState.EXECUTION);
+                
+                // Create message for ExecutionAgent with the approved plan
+                ChatMessageDTO execMessage = new ChatMessageDTO(
+                    "user",
+                    "Реализуй утвержденный план"
+                );
+                
+                AgentResult execResult = executionAgent.process(updatedContext, execMessage);
+                
+                // 4. Update context with ExecutionAgent result
+                updatedContext = updateContextWithResult(updatedContext, execResult, TaskState.EXECUTION);
+                
+                // Save context with implementation
+                saveContextToDb(session, updatedContext);
+                
+                logger.info("Auto-transition PLANNING → EXECUTION completed, ExecutionAgent invoked");
+                
+                // Return ExecutionAgent's response (implementation, not transition marker)
+                return updatedContext;
+            }
+            
+            // Standard transition for other states
             transitionToInternal(session, targetState, "Agent-suggested transition");
             updatedContext = updatedContext.withState(targetState);
             // Save context with updated state
