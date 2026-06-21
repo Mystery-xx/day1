@@ -85,19 +85,41 @@ public class AiTransitionStrategy implements TransitionStrategy {
     
     /**
      * Detect transition from EXECUTION to VALIDATION using AI.
+     * Checks if implementation is complete OR if user explicitly requests validation.
      */
     private Optional<TaskState> detectExecutionToValidation(TaskContext context, ChatMessageDTO message) {
         String systemPrompt = """
-            Ты определяешь готовность перехода от реализации к валидации. Анализируй полноту реализации и сообщение пользователя.
-            Если реализация завершена и пользователь готов к валидации, ответь ДА. Если нужны доработки, ответь НЕТ.
+            Ты определяешь готовность перехода от реализации к валидации. Анализируй сообщение пользователя.
+            Если пользователь просит проверить, завершил, готово, или явно просит валидацию - ответь ДА.
+            Если пользователь просит доработки или ещё не готов - ответь НЕТ.
             Ответь ТОЛЬКО одним словом: ДА или НЕТ. Никаких объяснений.
             """;
         
-        String plan = context.getApprovedPlan() != null ? context.getApprovedPlan() : "(план не утвержден)";
-        String implementation = context.getImplementation() != null ? context.getImplementation() : "(реализация отсутствует)";
-        String userPrompt = "План: " + plan + ". Реализация: " + implementation + ". Пользователь написал: " + message.getContent() + ". Готов ли пользователь перейти к валидации? Ответь ТОЛЬКО ДА или НЕТ.";
+        String userPrompt = "Пользователь написал: " + message.getContent() + ". Готов ли пользователь перейти к валидации? Ответь ТОЛЬКО ДА или НЕТ.";
         
-        return callAiAndDetectTransition(systemPrompt, userPrompt, TaskState.VALIDATION, message.getContent());
+        // First try AI detection
+        Optional<TaskState> aiResult = callAiAndDetectTransition(systemPrompt, userPrompt, TaskState.VALIDATION, message.getContent());
+        
+        // If AI didn't detect, check for explicit validation keywords in user message
+        if (aiResult.isEmpty()) {
+            String lowerContent = message.getContent().toLowerCase();
+            boolean explicitValidation = lowerContent.contains("проверяй") ||
+                                       lowerContent.contains("проверь") ||
+                                       lowerContent.contains("валидация") ||
+                                       lowerContent.contains("валидируй") ||
+                                       lowerContent.contains("готово") ||
+                                       lowerContent.contains("завершено") ||
+                                       lowerContent.contains("закончил") ||
+                                       lowerContent.contains("сделал") ||
+                                       lowerContent.contains("реализовал");
+            
+            if (explicitValidation) {
+                logger.info("Explicit validation keywords detected, transitioning to VALIDATION");
+                return Optional.of(TaskState.VALIDATION);
+            }
+        }
+        
+        return aiResult;
     }
     
     /**

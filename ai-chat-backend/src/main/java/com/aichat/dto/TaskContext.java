@@ -136,6 +136,17 @@ public class TaskContext {
             .build();
     }
 
+    /**
+     * Remove a single metadata entry (for cleanup after use).
+     */
+    public TaskContext withoutMetadataEntry(String key) {
+        Map<String, Object> newMetadata = new HashMap<>(this.metadata);
+        newMetadata.remove(key);
+        return new Builder(this)
+            .withMetadata(newMetadata)
+            .build();
+    }
+
     public static Builder builder() {
         return new Builder();
     }

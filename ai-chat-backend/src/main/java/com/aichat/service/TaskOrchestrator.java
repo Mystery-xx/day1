@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Optional;
 
 /**
@@ -150,9 +151,6 @@ public class TaskOrchestrator {
         return loadOrCreateContext(session);
     }
     
-    /**
-     * Update context with AgentResult based on current state.
-     */
     private TaskContext updateContextWithResult(TaskContext context, AgentResult result, TaskState currentState) {
         TaskContext updated = context;
         
@@ -167,9 +165,13 @@ public class TaskOrchestrator {
             if (validationResult != null) {
                 updated = updated.withMetadataEntry("validationStatus", validationResult.toString());
             }
+            // Save validation issues for ExecutionAgent (if revision needed)
+            Object validationIssues = result.getMetadata().get("validationIssues");
+            if (validationIssues != null && !validationIssues.toString().isBlank()) {
+                updated = updated.withMetadataEntry("validationIssues", validationIssues.toString());
+            }
         }
         
-        // Copy all metadata from result
         for (var entry : result.getMetadata().entrySet()) {
             if (!"lastAgentResponse".equals(entry.getKey())) {
                 updated = updated.withMetadataEntry(entry.getKey(), entry.getValue());
@@ -178,6 +180,15 @@ public class TaskOrchestrator {
         
         if (result.isNeedsRevision()) {
             updated = updated.withNeedsRevision(true);
+        }
+        
+        if (currentState == TaskState.PLANNING) {
+            updated = updated.withHistory(new ArrayList<>());
+        }
+        
+        // Clear validation issues after Execution (whether first pass or revision)
+        if (currentState == TaskState.EXECUTION) {
+            updated = updated.withoutMetadataEntry("validationIssues");
         }
         
         return updated;

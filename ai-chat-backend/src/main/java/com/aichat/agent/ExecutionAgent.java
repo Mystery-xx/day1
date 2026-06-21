@@ -9,7 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -29,10 +28,44 @@ public class ExecutionAgent extends AbstractAgent {
     
     @Override
     public String getSystemPrompt() {
-        return """
-            Ты на этапе ВЫПОЛНЕНИЯ. Реализуй задачу согласно утверждённому плану.
-            Следуй плану строго. Предоставляй рабочий код. Объясняй ключевые решения.
+        String basePrompt = """
+            Ты на этапе ВЫПОЛНЕНИЯ. Твоя единственная задача - реализовать утверждённый план.
+            
+            Правила:
+            - Следуй плану строго, не отклоняйся
+            - Предоставляй готовый рабочий код
+            - Объясняй ключевые решения кратко
+            - Не задавай уточняющих вопросов - просто реализуй
+            - Если план неполный - Сообщи об этом, но продолжай с максимальной точностью
             """;
+        
+        return basePrompt;
+    }
+    
+    @Override
+    protected Map<String, Object> buildRequestBody(String systemPrompt, String userMessage, TaskContext context) {
+        Map<String, Object> requestBody = super.buildRequestBody(systemPrompt, userMessage, context);
+        
+        if (context.getApprovedPlan() != null && !context.getApprovedPlan().isBlank()) {
+            List<Map<String, String>> messages = (List<Map<String, String>>) requestBody.get("messages");
+            if (!messages.isEmpty()) {
+                Map<String, String> systemMessage = messages.get(0);
+                String currentContent = systemMessage.get("content");
+                String planSection = "\n\n=== УТВЕРЖДЁННЫЙ ПЛАН ===\n" + context.getApprovedPlan();
+                
+                Object validationIssuesObj = context.getMetadata().get("validationIssues");
+                String validationIssues = validationIssuesObj != null ? validationIssuesObj.toString() : null;
+                if (validationIssues != null && !validationIssues.isBlank()) {
+                    planSection += "\n\n=== ЗАМЕЧАНИЯ ВАЛИДАЦИИ ===\n";
+                    planSection += "Следующие проблемы требуют исправления:\n" + validationIssues;
+                    planSection += "\n\nИсправь эти проблемы строго, сохраняя соответствие плану.";
+                }
+                
+                systemMessage.put("content", currentContent + planSection);
+            }
+        }
+        
+        return requestBody;
     }
     
     @Override
@@ -61,16 +94,6 @@ public class ExecutionAgent extends AbstractAgent {
     @Override
     protected Logger getLogger() {
         return logger;
-    }
-    
-    @Override
-    protected void addContextMessages(List<Map<String, String>> messages, TaskContext context) {
-        if (context.getApprovedPlan() != null) {
-            Map<String, String> planMsg = new HashMap<>();
-            planMsg.put("role", "user");
-            planMsg.put("content", "Контекст задачи:\n\n=== ПЛАН ===\n" + context.getApprovedPlan());
-            messages.add(planMsg);
-        }
     }
     
 }

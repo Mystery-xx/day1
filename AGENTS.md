@@ -14,11 +14,13 @@ cp .env.example .env
 
 # 2. Edit .env and set your API key
 # AI_API_KEY=your-api-key-here
+# AI_API_URL=https://your-ai-api.com/v1
+# AI_MODEL=qwen3.5-397b-a17b
 
 # 3. Build and start containers
 docker-compose up --build
 
-# 4. Open http://localhost:5173 in your browser
+# 4. Open http://localhost:80 in your browser
 ```
 
 To stop:
@@ -26,15 +28,21 @@ To stop:
 docker-compose down
 ```
 
+To stop and remove all data:
+```bash
+docker-compose down -v
+```
+
 ## Architecture
 
 ```
-Browser (:5173) → React → Vite proxy /api → Spring Boot (:8080) → AI API
+Browser (:80) → React → Nginx proxy /api → Spring Boot (:8080) → AI API
 ```
 
-- **Backend**: Spring Boot 3.2, Java 17, WebClient (reactive)
-- **Frontend**: React 18, Vite 5, no specialized AI libraries
+- **Backend**: Spring Boot 3.2, Java 17, WebFlux + WebClient (reactive)
+- **Frontend**: React 18, Vite 5, Nginx (production)
 - **AI Integration**: OpenAI-compatible REST API via `/api/chat`
+- **Database**: H2 (default), PostgreSQL, SQLite (multi-datasource)
 
 ## Key Files
 
@@ -62,16 +70,17 @@ Browser (:5173) → React → Vite proxy /api → Spring Boot (:8080) → AI API
 ## Gotchas
 
 1. **CORS**: Backend allows all origins (`@CrossOrigin("*")`) for dev
-2. **Proxy**: Vite proxies `/api` to `localhost:8080` in dev mode
-3. **Docker networking**: Frontend uses nginx to proxy `/api` to backend service
-4. **No tests**: Project has no test suite configured
-5. **In-memory only**: No database, chat history stored in browser session
+2. **Proxy**: Vite proxies `/api` to `localhost:8081` in dev mode (docker-compose.yml maps backend to 8081)
+3. **Docker networking**: Frontend uses nginx to proxy `/api` to backend service (backend:8080)
+4. **E2E Tests**: Project uses Playwright for end-to-end testing
+5. **Database**: H2 file-based database persisted in Docker volume `/data/chatdb`
 
 ## Build Notes
 
 - Backend: Multi-stage Docker (Maven build → JRE runtime)
 - Frontend: Multi-stage Docker (Node build → Nginx serving static files)
 - Model: Configured via `AI_MODEL` environment variable
+- Ports: Frontend on 80 (nginx), Backend on 8081 (external) / 8080 (internal)
 
 ## AI Agent Instructions
 

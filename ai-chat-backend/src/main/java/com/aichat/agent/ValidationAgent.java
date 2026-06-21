@@ -31,8 +31,14 @@ public class ValidationAgent extends AbstractAgent {
     @Override
     public String getSystemPrompt() {
         return """
-            Ты на этапе ВАЛИДАЦИИ. Проверь решение против утверждённого плана.
-            Сравни реализацию с планом. Выявляй несоответствия. Будь объективным.
+            Ты на этапе ВАЛИДАЦИИ. Твоя задача - объективно проверить реализацию против плана.
+            
+            Правила:
+            - Сравни реализацию с каждым пунктом плана
+            - Выявляй конкретные несоответствия
+            - Будь объективным - не принимай сторону
+            - Если всё соответствует - подтверди успех
+            - Если есть проблемы - перечисли конкретно
             """;
     }
     
@@ -50,16 +56,28 @@ public class ValidationAgent extends AbstractAgent {
         }
         
         String aiResponse = callAiApi(context, message);
-        ValidationResult result = aiResponse.toLowerCase().contains("ошибка") || 
-                                  aiResponse.toLowerCase().contains("не соответствует") 
-                                  ? ValidationResult.FAILED : ValidationResult.OK;
+        boolean hasErrors = aiResponse.toLowerCase().contains("ошибка") || 
+                           aiResponse.toLowerCase().contains("не соответствует") ||
+                           aiResponse.toLowerCase().contains("проблема");
+        
+        ValidationResult result = hasErrors ? ValidationResult.FAILED : ValidationResult.OK;
+        
+        // Extract specific issues for ExecutionAgent to fix
+        String issues = hasErrors ? extractIssues(aiResponse) : "";
         
         return AgentResult.builder()
                 .content(aiResponse)
-                .needsRevision(result == ValidationResult.FAILED)
+                .needsRevision(hasErrors)
                 .metadataEntry("validationStatus", result.name())
+                .metadataEntry("validationIssues", issues)
                 .metadataEntry("lastAgentResponse", aiResponse)
                 .build();
+    }
+    
+    private String extractIssues(String validationResponse) {
+        // Extract the specific issues mentioned in validation response
+        // This will be passed to ExecutionAgent for fixing
+        return validationResponse.trim();
     }
     
     @Override

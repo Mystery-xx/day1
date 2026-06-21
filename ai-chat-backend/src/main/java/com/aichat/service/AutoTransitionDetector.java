@@ -23,7 +23,8 @@ public class AutoTransitionDetector {
     
     // Keywords for Execution → Validation transition
     private static final Set<String> EXECUTION_TO_VALIDATION_KEYWORDS = Set.of(
-        "готово", "реализовал", "сделал", "завершил", "выполнил"
+        "готово", "реализовал", "сделал", "сделай", "завершил", "выполнил",
+        "done", "implemented", "finished", "completed", "validate", "check this"
     );
     
     // Keywords for Validation → Done transition    
@@ -62,7 +63,7 @@ public class AutoTransitionDetector {
         
         return switch (currentState) {
             case PLANNING -> detectPlanningTransition(content);
-            case EXECUTION -> detectExecutionTransition(content);
+            case EXECUTION -> detectExecutionTransition(context, content);
             case VALIDATION -> detectValidationTransition(content);
             case DONE -> detectDoneTransition(content);
         };
@@ -75,20 +76,32 @@ public class AutoTransitionDetector {
         return Optional.empty();
     }
     
-    private Optional<TaskState> detectExecutionTransition(String content) {
-        if (containsKeyword(content, EXECUTION_TO_VALIDATION_KEYWORDS) &&
-            hasCodeBlock(content)) {
+    private Optional<TaskState> detectExecutionTransition(TaskContext context, String content) {
+        // Automatic transition to VALIDATION when ExecutionAgent completes implementation
+        // No explicit user keyword required
+        
+        boolean hasImplementation = context.getImplementation() != null && !context.getImplementation().isBlank();
+        
+        if (hasImplementation) {
             return Optional.of(TaskState.VALIDATION);
         }
         return Optional.empty();
     }
     
     private Optional<TaskState> detectValidationTransition(String content) {
+        // Check for validation issues (indicates need for revision)
+        boolean hasIssues = content.toLowerCase().contains("ошибка") ||
+                           content.toLowerCase().contains("не соответствует") ||
+                           content.toLowerCase().contains("проблема") ||
+                           content.toLowerCase().contains("исправь");
+        
+        if (hasIssues) {
+            // Return to EXECUTION for fixes, not PLANNING
+            return Optional.of(TaskState.EXECUTION);
+        }
+        
         if (containsKeyword(content, VALIDATION_TO_DONE_KEYWORDS)) {
             return Optional.of(TaskState.DONE);
-        }
-        if (containsKeyword(content, VALIDATION_TO_PLANNING_KEYWORDS)) {
-            return Optional.of(TaskState.PLANNING);
         }
         return Optional.empty();
     }
