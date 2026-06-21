@@ -51,6 +51,9 @@ public class TaskContextEntity {
     @Column(name = "needs_revision", nullable = false)
     private Boolean needsRevision = false;
     
+    @Column(name = "paused", nullable = false)
+    private boolean paused = false;
+    
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
     
@@ -122,6 +125,14 @@ public class TaskContextEntity {
     
     public void setNeedsRevision(Boolean needsRevision) {
         this.needsRevision = needsRevision;
+    }
+    
+    public boolean isPaused() {
+        return paused;
+    }
+    
+    public void setPaused(boolean paused) {
+        this.paused = paused;
     }
     
     public Instant getCreatedAt() {

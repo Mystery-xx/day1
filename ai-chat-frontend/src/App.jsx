@@ -281,6 +281,9 @@ function App() {
               console.log('Setting debugRequest immediately:', data.data)
               setLastRequest(data.data)
               setLastResponse({ debugRequest: data.data })
+            } else if (data.type === 'taskState') {
+              console.log('Task state transition:', data.data)
+              setTaskState(data.data.state)
             } else if (data.type === 'response') {
               const response = data.data
               console.log('Full response:', response)

@@ -1,7 +1,9 @@
 package com.aichat.dto;
 
+import com.aichat.enums.TaskState;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Unified result DTO for agent responses.
@@ -12,31 +14,35 @@ public class AgentResult {
     private final String content;
     private final Map<String, Object> metadata;
     private final boolean needsRevision;
+    private final Optional<TaskState> suggestedNextState;
 
     private AgentResult(Builder builder) {
         this.content = builder.content;
         this.metadata = builder.metadata != null ? new HashMap<>(builder.metadata) : new HashMap<>();
         this.needsRevision = builder.needsRevision;
+        this.suggestedNextState = builder.suggestedNextState != null ? builder.suggestedNextState : Optional.empty();
     }
 
     /**
      * Constructor with content only.
-     * Metadata is empty, needsRevision is false.
+     * Metadata is empty, needsRevision is false, suggestedNextState is empty.
      */
     public AgentResult(String content) {
         this.content = content;
         this.metadata = new HashMap<>();
         this.needsRevision = false;
+        this.suggestedNextState = Optional.empty();
     }
 
     /**
      * Constructor with content and needsRevision flag.
-     * Metadata is empty.
+     * Metadata is empty, suggestedNextState is empty.
      */
     public AgentResult(String content, boolean needsRevision) {
         this.content = content;
         this.metadata = new HashMap<>();
         this.needsRevision = needsRevision;
+        this.suggestedNextState = Optional.empty();
     }
 
     public String getContent() {
@@ -49,6 +55,10 @@ public class AgentResult {
 
     public boolean isNeedsRevision() {
         return needsRevision;
+    }
+
+    public Optional<TaskState> getSuggestedNextState() {
+        return suggestedNextState;
     }
 
     /**
@@ -80,6 +90,15 @@ public class AgentResult {
             .build();
     }
 
+    /**
+     * Create a new AgentResult with updated suggestedNextState.
+     */
+    public AgentResult withSuggestedNextState(TaskState suggestedNextState) {
+        return new Builder(this)
+            .suggestedNextState(suggestedNextState)
+            .build();
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -92,16 +111,19 @@ public class AgentResult {
         private String content;
         private Map<String, Object> metadata;
         private boolean needsRevision;
+        private Optional<TaskState> suggestedNextState;
 
         public Builder() {
             this.metadata = new HashMap<>();
             this.needsRevision = false;
+            this.suggestedNextState = Optional.empty();
         }
 
         public Builder(AgentResult existing) {
             this.content = existing.content;
             this.metadata = existing.metadata != null ? new HashMap<>(existing.metadata) : new HashMap<>();
             this.needsRevision = existing.needsRevision;
+            this.suggestedNextState = existing.suggestedNextState != null ? existing.suggestedNextState : Optional.empty();
         }
 
         public Builder content(String content) {
@@ -143,6 +165,11 @@ public class AgentResult {
 
         public Builder withNeedsRevision(boolean needsRevision) {
             this.needsRevision = needsRevision;
+            return this;
+        }
+
+        public Builder suggestedNextState(TaskState state) {
+            this.suggestedNextState = state != null ? Optional.of(state) : Optional.empty();
             return this;
         }
 

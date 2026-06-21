@@ -36,7 +36,7 @@ public enum TaskState {
      * Check if transition from this state to target state is valid.
      * Valid transitions:
      * - PLANNING → EXECUTION
-     * - EXECUTION → VALIDATION
+     * - EXECUTION → VALIDATION, PLANNING
      * - VALIDATION → EXECUTION, DONE, PLANNING
      * - DONE → PLANNING (only for new requirements)
      */
@@ -47,7 +47,7 @@ public enum TaskState {
         
         return switch (this) {
             case PLANNING -> to == EXECUTION;
-            case EXECUTION -> to == VALIDATION;
+            case EXECUTION -> to == VALIDATION || to == PLANNING;
             case VALIDATION -> to == EXECUTION || to == DONE || to == PLANNING;
             case DONE -> to == PLANNING;
         };

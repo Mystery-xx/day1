@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-AI Chat web application with Spring Boot backend + React/Vite frontend, connecting to OpenAI-compatible AI API.
+AI Chat web application with Spring Boot backend + React/Vite frontend, featuring task orchestration, working memory, multi-provider AI support (GPUStack/HuggingFace), and developer profiles.
 
 ## Quick Start (Docker Only)
 
@@ -12,10 +12,11 @@ AI Chat web application with Spring Boot backend + React/Vite frontend, connecti
 # 1. Copy environment configuration
 cp .env.example .env
 
-# 2. Edit .env and set your API key
+# 2. Edit .env and set your API keys
 # AI_API_KEY=your-api-key-here
 # AI_API_URL=https://your-ai-api.com/v1
 # AI_MODEL=qwen3.5-397b-a17b
+# AI_PROVIDER=gpustack
 
 # 3. Build and start containers
 docker-compose up --build
@@ -43,6 +44,7 @@ Browser (:80) → React → Nginx proxy /api → Spring Boot (:8080) → AI API
 - **Frontend**: React 18, Vite 5, Nginx (production)
 - **AI Integration**: OpenAI-compatible REST API via `/api/chat`
 - **Database**: H2 (default), PostgreSQL, SQLite (multi-datasource)
+- **State Machine**: Task orchestration with Planning → Execution → Validation → Done
 
 ## Key Files
 
@@ -61,11 +63,18 @@ Browser (:80) → React → Nginx proxy /api → Spring Boot (:8080) → AI API
 | `AI_API_KEY` | (required) | API key for AI endpoint |
 | `AI_API_URL` | (required) | AI API base URL |
 | `AI_MODEL` | (required) | Model name |
+| `AI_PROVIDER` | `gpustack` | Provider: `gpustack` or `huggingface` |
+| `HUGGINGFACE_API_URL` | `https://router.huggingface.co/v1` | HuggingFace API URL |
+| `HUGGINGFACE_TOKEN` | (required for HF) | HuggingFace token |
 
 ## API Endpoints
 
 - `POST /api/chat` - Send message, receive AI response
 - `GET /api/chat/health` - Health check
+- `GET /api/chat/models` - List available models
+- `GET/DELETE /api/chat/sessions` - List/delete sessions
+- `POST /api/chat/history/session` - Create session
+- `GET /api/chat/sessions/{id}/state` - Get task state
 
 ## Gotchas
 
@@ -74,6 +83,7 @@ Browser (:80) → React → Nginx proxy /api → Spring Boot (:8080) → AI API
 3. **Docker networking**: Frontend uses nginx to proxy `/api` to backend service (backend:8080)
 4. **E2E Tests**: Project uses Playwright for end-to-end testing
 5. **Database**: H2 file-based database persisted in Docker volume `/data/chatdb`
+6. **Ports**: Frontend on 80 (nginx), Backend on 8081 (external) / 8080 (internal)
 
 ## Build Notes
 
@@ -81,6 +91,7 @@ Browser (:80) → React → Nginx proxy /api → Spring Boot (:8080) → AI API
 - Frontend: Multi-stage Docker (Node build → Nginx serving static files)
 - Model: Configured via `AI_MODEL` environment variable
 - Ports: Frontend on 80 (nginx), Backend on 8081 (external) / 8080 (internal)
+- Backend exposes port 8082 for additional services (configured in docker-compose.yml)
 
 ## AI Agent Instructions
 

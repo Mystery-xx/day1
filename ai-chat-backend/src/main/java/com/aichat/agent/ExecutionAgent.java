@@ -29,7 +29,7 @@ public class ExecutionAgent extends AbstractAgent {
     @Override
     public String getSystemPrompt() {
         String basePrompt = """
-            Ты на этапе ВЫПОЛНЕНИЯ. Твоя единственная задача - реализовать утверждённый план.
+            Ты на этапе ВЫПОЛНЕНИЯ. Твоя единственная задача - реализовать утверждённый план. Планировать, валидировать, закрывать задачу запрещено.
             
             Правила:
             - Следуй плану строго, не отклоняйся
@@ -76,13 +76,23 @@ public class ExecutionAgent extends AbstractAgent {
             return AgentResult.builder()
                     .content("Error: No approved plan")
                     .needsRevision(false)
+                    .suggestedNextState(TaskState.PLANNING)
                     .build();
         }
         
         String aiResponse = callAiApi(context, message);
+        
+        // Check if code is ready or replan needed based on AI response
+        boolean codeReady = aiResponse != null && !aiResponse.contains("не могу реализовать") && !aiResponse.contains("требуется пересмотр плана");
+        boolean replanNeeded = aiResponse != null && (aiResponse.contains("требуется пересмотр плана") || aiResponse.contains("необходимо уточнить план"));
+        
+        TaskState nextState = replanNeeded ? TaskState.PLANNING : TaskState.VALIDATION;
+        String transitionMarker = replanNeeded ? "[ПЕРЕХОД К PLANNING]" : "[ПЕРЕХОД К VALIDATION]";
+        
         return AgentResult.builder()
-                .content(aiResponse)
+                .content(aiResponse + "\n\n" + transitionMarker)
                 .needsRevision(false)
+                .suggestedNextState(nextState)
                 .build();
     }
     

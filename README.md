@@ -1,47 +1,47 @@
 # AI Chat Application
 
-AI-powered chat application with advanced task orchestration, working memory, and multi-provider support.
+AI-powered chat application with Spring Boot backend and React frontend, featuring task orchestration, working memory, multi-provider AI support (GPUStack/HuggingFace), and developer profiles.
 
-## ⚠️ Важно: Только Docker запуск
+## ⚠️ Docker-Only Deployment
 
-**Приложение предназначено для запуска ИСКЛЮЧИТЕЛЬНО в Docker контейнерах.**
+**This application is designed to run EXCLUSIVELY in Docker containers.**
 
-Локальная разработка (npm/mvn) **не рекомендуется** из-за:
-- Сложностей с проксированием между frontend и backend
-- Необходимости настройки CORS для каждого окружения
-- Проблем с доступом к API ключам в локальной среде
-- Различий в сетевой конфигурации между Docker и localhost
+Local development (npm/mvn) is **NOT recommended** due to:
+- Complex proxying requirements between frontend and backend
+- CORS configuration complexity across environments
+- API key management challenges in local environments
+- Network configuration differences between Docker and localhost
 
-**Используйте Docker для всех сценариев разработки и продакшена.**
+**Use Docker for all development and production scenarios.**
 
-## Быстрый старт
+## Quick Start
 
 ```bash
-# 1. Скопируйте конфигурацию окружения
+# 1. Copy environment configuration
 cp .env.example .env
 
-# 2. Отредактируйте .env и укажите ваши значения
+# 2. Edit .env and set your values
 # AI_API_KEY=your-api-key-here
 # AI_API_URL=https://your-ai-api.com/v1
 # AI_MODEL=qwen3.5-397b-a17b
 
-# 3. Соберите и запустите контейнеры
+# 3. Build and start containers
 docker-compose up --build
 
-# 4. Откройте http://localhost:80 в браузере
+# 4. Open http://localhost:80 in your browser
 ```
 
-Для остановки:
+To stop:
 ```bash
 docker-compose down
 ```
 
-Для остановки с удалением данных:
+To stop and remove all data:
 ```bash
 docker-compose down -v
 ```
 
-## Архитектура
+## Architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
@@ -58,30 +58,31 @@ docker-compose down -v
                                          └──────────────┘
 ```
 
-### Технологический стек
+### Technology Stack
 
 **Backend:**
 - Spring Boot 3.2, Java 17
-- WebFlux + WebClient (реактивный HTTP клиент)
+- WebFlux + WebClient (reactive HTTP client)
 - Spring Data JPA + Hibernate
 - H2 Database (embedded), PostgreSQL, SQLite (multi-datasource)
-- Flyway (миграции БД)
-- Caffeine (кэширование)
-- Maven (сборка)
+- Flyway (database migrations)
+- Caffeine (caching)
+- Maven (build tool)
+- Spring Boot Actuator (health checks)
 
 **Frontend:**
 - React 18 + Vite 5
-- Pure CSS (без фреймворков)
-- react-markdown (рендеринг Markdown)
-- recharts (визуализация)
-- Nginx (продакшен сервер)
+- Pure CSS (no frameworks)
+- react-markdown (Markdown rendering)
+- recharts (data visualization)
+- Nginx (production server)
 
 **Docker:**
-- Multi-stage сборка для обоих сервисов
-- Docker Compose для оркестрации
-- Сетевая изоляция между сервисами
+- Multi-stage builds for both services
+- Docker Compose for orchestration
+- Network isolation between services
 
-## Структура проекта
+## Project Structure
 
 ```
 ai-chat/
@@ -130,13 +131,14 @@ ai-chat/
 │       │   │   ├── StickyFact.java
 │       │   │   ├── TaskContextEntity.java
 │       │   │   ├── UserProfile.java
+│       │   │   ├── User.java
 │       │   │   ├── ArchitecturalDecision.java
 │       │   │   ├── DomainKnowledge.java
 │       │   │   └── ProjectConstraint.java
 │       │   ├── repository/
-│       │   │   └── (8 Spring Data JPA repositories)
+│       │   │   └── (9 Spring Data JPA repositories)
 │       │   ├── dto/
-│       │   │   └── (17 DTO классов)
+│       │   │   └── (20+ DTO classes)
 │       │   ├── enums/
 │       │   │   └── TaskState.java
 │       │   ├── builder/
@@ -170,101 +172,107 @@ ai-chat/
 │           ├── useChatHistory.js
 │           └── useSessionList.js
 │
-├── e2e/                       # Playwright E2E тесты
+├── e2e/                       # Playwright E2E tests
+│   └── user-profile-qa.spec.ts
 ├── docker-compose.yml
 ├── .env.example
-└── README.md
+├── README.md
+├── README.Docker.md
+└── AGENTS.md
 ```
 
-## Переменные окружения
+## Environment Variables
 
-| Переменная | Значение по умолчанию | Описание |
-|------------|----------------------|----------|
-| `AI_API_KEY` | (требуется) | API ключ для доступа к ИИ |
-| `AI_API_URL` | (требуется) | Базовый URL ИИ API |
-| `AI_MODEL` | (требуется) | Название модели |
-| `AI_PROVIDER` | `gpustack` | Провайдер: `gpustack` или `huggingface` |
-| `GPUSTACK_API_URL` | - | URL GPUStack API (опционально) |
-| `HUGGINGFACE_API_URL` | `https://router.huggingface.co/v1` | URL HuggingFace API |
-| `HUGGINGFACE_TOKEN` | (требуется для HF) | Токен HuggingFace |
-| `AI_TEMPERATURE` | `0.7` | Температура генерации |
-| `AI_MAX_TOKENS` | `1024` | Максимум токенов в ответе |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AI_API_KEY` | (required) | API key for AI endpoint |
+| `AI_API_URL` | (required) | AI API base URL |
+| `AI_MODEL` | (required) | Model name |
+| `AI_PROVIDER` | `gpustack` | Provider: `gpustack` or `huggingface` |
+| `GPUSTACK_API_URL` | - | GPUStack API URL (optional) |
+| `HUGGINGFACE_API_URL` | `https://router.huggingface.co/v1` | HuggingFace API URL |
+| `HUGGINGFACE_TOKEN` | (required for HF) | HuggingFace token |
+| `AI_TEMPERATURE` | `0.7` | Generation temperature |
+| `AI_MAX_TOKENS` | `1024` | Maximum tokens in response |
 | `AI_TOP_P` | `1.0` | Top P sampling |
-| `AI_FREQUENCY_PENALTY` | `0.0` | Частотный штраф |
-| `AI_PRESENCE_PENALTY` | `0.0` | Штраф присутствия |
-| `AI_STOP` | - | Stop sequences (через запятую) |
+| `AI_FREQUENCY_PENALTY` | `0.0` | Frequency penalty |
+| `AI_PRESENCE_PENALTY` | `0.0` | Presence penalty |
+| `AI_STOP` | - | Stop sequences (comma-separated) |
+| `AI_HISTORY_LIMIT` | `10` | Number of messages in sliding window |
+| `DOCKER_FRONTEND_PORT` | `5173` | Frontend dev port (optional) |
+| `DOCKER_BACKEND_PORT` | `8080` | Backend port (optional) |
 
-## Основные возможности
+## Key Features
 
-### 🎯 Чат с ИИ
+### 🎯 AI Chat
 
-- **SSE Streaming** - потоковая передача ответов в реальном времени
-- **Markdown рендеринг** - форматирование ответов через react-markdown
-- **История диалога** - сохранение контекста в рамках сессии
-- **Ветвление (Branch)** - создание новой сессии на основе существующей до указанного сообщения
-- **Дублирование сессий** - копирование сессии полностью (до 3 копий)
+- **SSE Streaming** - Real-time response streaming
+- **Markdown Rendering** - Formatted responses via react-markdown
+- **Dialog History** - Context preservation within sessions
+- **Branching** - Create new session from existing one up to specified message
+- **Session Duplication** - Copy entire sessions (up to 3 copies)
 
-### 🧠 Управление памятью
+### 🧠 Memory Management
 
-**Три уровня памяти:**
+**Three memory levels:**
 
-1. **Долгосрочная память (Long-term Memory)**
-   - Профили разработчиков с настройками стиля общения
-   - Шаблоны промптов для разных ролей
-   - Сохраняются между сессиями
+1. **Long-term Memory**
+   - Developer profiles with communication style settings
+   - Prompt templates for different roles
+   - Persisted across sessions
 
-2. **Рабочая память (Working Memory)**
-   - Sticky Facts - ключевые факты из диалога
-   - Автоматическое извлечение после N сообщений
-   - Ручное добавление/удаление фактов
-   - Throttling для предотвращения избыточного извлечения
+2. **Working Memory**
+   - Sticky Facts - key facts from dialog
+   - Automatic extraction after N messages
+   - Manual fact addition/removal
+   - Throttling to prevent excessive extraction
 
-3. **Краткосрочная память (Short-term Memory)**
-   - Последние 10 сообщений диалога
-   - Используется для контекста при генерации ответов
+3. **Short-term Memory**
+   - Last 10 dialog messages
+   - Used for context during response generation
 
-### 📊 Стратегии управления контекстом
+### 📊 Context Management Strategies
 
-Три стратегии для разных сценариев:
+Three strategies for different scenarios:
 
-| Стратегия | Описание | Когда использовать |
-|-----------|----------|-------------------|
-| **Summary** | Автоматическая суммаризация старых сообщений | Длинные диалоги, экономия токенов |
-| **Sticky Facts** | Контекст на основе ключевых фактов | Когда важны конкретные детали |
-| **Sliding Window** | Фиксированное окно последних сообщений | Короткие диалоги, простой режим |
+| Strategy | Description | When to Use |
+|----------|-------------|-------------|
+| **Summary** | Automatic summarization of old messages | Long dialogs, token savings |
+| **Sticky Facts** | Context based on key facts | When specific details matter |
+| **Sliding Window** | Fixed window of recent messages | Short dialogs, simple mode |
 
-### 🤖 State Machine (Оркестрация задач)
+### 🤖 State Machine (Task Orchestration)
 
-Автоматизированная оркестрация задач через state machine:
+Automated task orchestration via state machine:
 
-**4 состояния:**
-- 🟡 **PLANNING** - Планирование задачи
-- 🔵 **EXECUTION** - Выполнение плана
-- 🟠 **VALIDATION** - Валидация результата
-- 🟢 **DONE** - Задача завершена
+**4 states:**
+- 🟡 **PLANNING** - Task planning
+- 🔵 **EXECUTION** - Plan execution
+- 🟠 **VALIDATION** - Result validation
+- 🟢 **DONE** - Task completed
 
-**Агенты:**
-- **PlanningAgent** - Генерирует план, ожидает подтверждения
-- **ExecutionAgent** - Реализует утвержденный план
-- **ValidationAgent** - Проверяет результат, выявляет проблемы
-- **DoneAgent** - Обрабатывает завершенные задачи
+**Agents:**
+- **PlanningAgent** - Generates plan, awaits confirmation
+- **ExecutionAgent** - Implements approved plan
+- **ValidationAgent** - Validates result, identifies issues
+- **DoneAgent** - Handles completed tasks
 
-**Переходы:**
-- PLANNING → EXECUTION (после утверждения плана)
-- EXECUTION → VALIDATION (после реализации)
-- VALIDATION → EXECUTION (доработка) | DONE (успех) | PLANNING (новые требования)
-- DONE → PLANNING (новая итерация)
+**Transitions:**
+- PLANNING → EXECUTION (after plan approval)
+- EXECUTION → VALIDATION (after implementation)
+- VALIDATION → EXECUTION (rework) | DONE (success) | PLANNING (new requirements)
+- DONE → PLANNING (new iteration)
 
-### ⚙️ Настройки модели
+### ⚙️ Model Settings
 
-- **Мультипровайдер**: GPUStack (по умолчанию), HuggingFace
-- **Выбор модели**: Автоматическая загрузка доступных моделей
-- **Категоризация моделей**:
-  - **super**: 300B+ параметров (qwen3.5-397b, qwen3-235b)
+- **Multi-provider**: GPUStack (default), HuggingFace
+- **Model Selection**: Automatic loading of available models
+- **Model Categorization**:
+  - **super**: 300B+ parameters (qwen3.5-397b, qwen3-235b)
   - **strong**: 70B-100B (qwen2.5-72b, llama-3-70b)
   - **medium**: 13B-32B
   - **weak**: <8B (qwen2.5-0.5b, phi-2)
-- **Параметры генерации**:
+- **Generation Parameters**:
   - Temperature
   - Max tokens
   - Top P
@@ -272,187 +280,188 @@ ai-chat/
   - Presence penalty
   - Stop sequences
 
-### 🐛 Debug-панель
+### 🐛 Debug Panel
 
-- Просмотр 3 уровней памяти
-- Raw JSON запросов/ответов API
-- Отладка суммаризации
-- Информация о токенах
+- View all 3 memory levels
+- Raw JSON API requests/responses
+- Summarization debugging
+- Token usage information
 
 ## API Endpoints
 
-### Чат
+### Chat
 
-| Endpoint | Метод | Описание |
-|----------|-------|----------|
-| `/api/chat/stream` | POST | Стриминг ответов ИИ (SSE) |
-| `/api/chat` | POST | Отправить сообщение, получить ответ |
-| `/api/chat/health` | GET | Проверка работоспособности |
-| `/api/chat/models` | GET | Список доступных моделей |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/stream` | POST | AI response streaming (SSE) |
+| `/api/chat` | POST | Send message, get AI response |
+| `/api/chat/health` | GET | Health check |
+| `/api/chat/models` | GET | List available models |
 
-### Сессии
+### Sessions
 
-| Endpoint | Метод | Описание |
-|----------|-------|----------|
-| `/api/chat/sessions` | GET | Список всех сессий (с пагинацией) |
-| `/api/chat/sessions` | DELETE | Удалить все сессии |
-| `/api/chat/history/session` | POST | Создать новую сессию |
-| `/api/chat/sessions/{sessionId}` | DELETE | Удалить конкретную сессию |
-| `/api/chat/sessions/{sessionId}/duplicate` | POST | Дублировать сессию (параметр `count`) |
-| `/api/chat/sessions/{sessionId}/branch` | POST | Создать ветку сессии до сообщения (параметр `messageIndex`) |
-| `/api/chat/sessions/{sessionId}/summary` | DELETE | Удалить суммаризацию сессии |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/sessions` | GET | List all sessions (with pagination) |
+| `/api/chat/sessions` | DELETE | Delete all sessions |
+| `/api/chat/history/session` | POST | Create new session |
+| `/api/chat/sessions/{sessionId}` | DELETE | Delete specific session |
+| `/api/chat/sessions/{sessionId}/duplicate` | POST | Duplicate session (param: `count`) |
+| `/api/chat/sessions/{sessionId}/branch` | POST | Create session branch up to message (param: `messageIndex`) |
+| `/api/chat/sessions/{sessionId}/summary` | DELETE | Delete session summarization |
 
-### История сообщений
+### Message History
 
-| Endpoint | Метод | Описание |
-|----------|-------|----------|
-| `/api/chat/history/{sessionId}` | GET | Получить историю сообщений сессии |
-| `/api/chat/history/{sessionId}` | DELETE | Удалить историю сообщений сессии |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/history/{sessionId}` | GET | Get session message history |
+| `/api/chat/history/{sessionId}` | DELETE | Delete session message history |
 
-### Sticky Facts (Рабочая память)
+### Sticky Facts (Working Memory)
 
-| Endpoint | Метод | Описание |
-|----------|-------|----------|
-| `/api/chat/sessions/{sessionId}/sticky-facts` | GET | Получить список фактов сессии |
-| `/api/chat/sessions/{sessionId}/sticky-facts` | POST | Добавить новый факт (body: `{factKey, factValue}`) |
-| `/api/chat/sessions/{sessionId}/sticky-facts/{factKey}` | DELETE | Удалить конкретный факт |
-| `/api/chat/sessions/{sessionId}/sticky-facts` | DELETE | Удалить все факты сессии |
-| `/api/chat/sessions/{sessionId}/extract-facts` | POST | Ручное извлечение фактов (body: `{model, provider}` - опционально) |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/sessions/{sessionId}/sticky-facts` | GET | Get session facts list |
+| `/api/chat/sessions/{sessionId}/sticky-facts` | POST | Add new fact (body: `{factKey, factValue}`) |
+| `/api/chat/sessions/{sessionId}/sticky-facts/{factKey}` | DELETE | Delete specific fact |
+| `/api/chat/sessions/{sessionId}/sticky-facts` | DELETE | Delete all session facts |
+| `/api/chat/sessions/{sessionId}/extract-facts` | POST | Manual fact extraction (body: `{model, provider}` - optional) |
 
 ### State Machine
 
-| Endpoint | Метод | Описание |
-|----------|-------|----------|
-| `/api/chat/sessions/{sessionId}/state` | GET | Получить текущее состояние задачи |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/sessions/{sessionId}/state` | GET | Get current task state |
 
-### Профили разработчиков
+### Developer Profiles
 
-| Endpoint | Метод | Описание |
-|----------|-------|----------|
-| `/api/chat/profiles` | GET | Список всех профилей |
-| `/api/chat/profiles/{id}` | GET | Получить профиль по ID |
-| `/api/chat/profiles/{id}/activate` | POST | Активировать профиль |
-| `/api/chat/profiles/active` | GET | Получить активный профиль |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/profiles` | GET | List all profiles |
+| `/api/chat/profiles/{id}` | GET | Get profile by ID |
+| `/api/chat/profiles/{id}/activate` | POST | Activate profile |
+| `/api/chat/profiles/active` | GET | Get active profile |
 
-## База данных
+## Database
 
-### Таблицы
+### Tables
 
-| Таблица | Описание |
-|---------|----------|
-| `chat_session` | Сессии чата с состоянием state machine |
-| `chat_message` | История сообщений с метаданными |
-| `sticky_fact` | Рабочая память (факты сессии) |
-| `task_context` | Контекст state machine (план, реализация, валидация) |
-| `developer_profile` | Профили разработчиков (долгосрочная память) |
-| `architectural_decision` | Архитектурные решения |
-| `domain_knowledge` | Предметные знания |
-| `project_constraint` | Ограничения проекта |
+| Table | Description |
+|-------|-------------|
+| `chat_session` | Chat sessions with state machine state |
+| `chat_message` | Message history with metadata |
+| `sticky_fact` | Working memory (session facts) |
+| `task_context` | State machine context (plan, execution, validation) |
+| `user_profile` | Developer profiles (long-term memory) |
+| `user` | User entities |
+| `architectural_decision` | Architectural decisions |
+| `domain_knowledge` | Domain knowledge |
+| `project_constraint` | Project constraints |
 
-### Поддерживаемые БД
+### Supported Databases
 
-- **H2** (по умолчанию) - embedded, файл `/data/chatdb`
-- **PostgreSQL** - для долгосрочной памяти
-- **SQLite** - для рабочей памяти
+- **H2** (default) - embedded, file `/data/chatdb`
+- **PostgreSQL** - for long-term memory
+- **SQLite** - for working memory
 
-Миграции выполняются через Flyway.
+Migrations handled via Flyway.
 
 ## Troubleshooting
 
-### Просмотр логов
+### View Logs
 
 ```bash
-# Все логи
+# All logs
 docker-compose logs -f
 
-# Только backend
+# Backend only
 docker-compose logs -f backend
 
-# Только frontend
+# Frontend only
 docker-compose logs -f frontend
 ```
 
 ### 500 Internal Server Error
 
-**Причина**: Ошибка CORS конфигурации или проблемы с AI API.
+**Cause**: CORS configuration error or AI API issues.
 
-**Решение**:
-1. Проверьте логи backend: `docker logs ai-chat-backend`
-2. Убедитесь что API ключ правильный в `.env`
-3. Проверьте доступность AI API: `curl $AI_API_URL/models`
+**Solution**:
+1. Check backend logs: `docker logs ai-chat-backend`
+2. Verify API key is correct in `.env`
+3. Check AI API availability: `curl $AI_API_URL/models`
 
 ### 503 Service Unavailable
 
-**Причина**: Backend недоступен или таймаут запроса к AI API.
+**Cause**: Backend unavailable or AI API request timeout.
 
-**Решение**:
-1. Проверьте что backend запущен: `docker ps | grep backend`
-2. Проверьте логи на предмет таймаутов
-3. Увеличьте таймаут в `application.yml` если AI API отвечает медленно
+**Solution**:
+1. Verify backend is running: `docker ps | grep backend`
+2. Check logs for timeouts
+3. Increase timeout in `application.yml` if AI API responds slowly
 
-### Cannot connect to backend
+### Cannot Connect to Backend
 
-**Причина**: Frontend в Docker не может достичь backend.
+**Cause**: Frontend in Docker cannot reach backend.
 
-**Решение**:
-1. Убедитесь что оба контейнера в одной сети: `docker network inspect demo_ai-chat-network`
-2. Проверьте что backend слушает `0.0.0.0:8080`
-3. Перезапустите контейнеры: `docker-compose restart`
+**Solution**:
+1. Verify both containers are on same network: `docker network inspect demo_ai-chat-network`
+2. Check backend is listening on `0.0.0.0:8080`
+3. Restart containers: `docker-compose restart`
 
-### Проблемы с портами
+### Port Issues
 
-**Frontend недоступен на порту 80**:
-- Проверьте что порт 80 не занят: `docker ps | grep :80`
-- Измените порт в `docker-compose.yml`: `ports: - "8080:80"`
+**Frontend unavailable on port 80**:
+- Check if port 80 is busy: `docker ps | grep :80`
+- Change port in `docker-compose.yml`: `ports: - "8080:80"`
 
-**Backend недоступен на порту 8081**:
-- Проверьте логи: `docker logs ai-chat-backend`
-- Убедитесь что `application.yml` настроен на порт 8080
+**Backend unavailable on port 8081**:
+- Check logs: `docker logs ai-chat-backend`
+- Verify `application.yml` is configured for port 8080
 
-## Разработка
+## Development
 
-### Внесение изменений в код
+### Making Code Changes
 
-**ВАЖНО**: После ЛЮБОГО изменения кода необходимо пересобрать контейнеры:
+**IMPORTANT**: After ANY code change, rebuild containers:
 
 ```bash
 docker-compose up --build
 ```
 
-Причины:
-- Приложение работает ИСКЛЮЧИТЕЛЬНО в Docker контейнерах
-- Изменения в локальных файлах НЕ подхватываются горячо
-- Оба сервиса должны быть пересобраны для применения изменений
+Reasons:
+- Application runs EXCLUSIVELY in Docker containers
+- Local file changes are NOT hot-reloaded
+- Both services must be rebuilt to apply changes
 
-### Избирательная пересборка
+### Selective Rebuild
 
-Если изменен только один сервис:
+If only one service is modified:
 
 ```bash
-# Только frontend
+# Frontend only
 docker-compose build ai-chat-frontend && docker-compose up ai-chat-frontend
 
-# Только backend
+# Backend only
 docker-compose build ai-chat-backend && docker-compose up ai-chat-backend
 ```
 
-Но полная пересборка (`docker-compose up --build`) рекомендуется для консистентности.
+But full rebuild (`docker-compose up --build`) is recommended for consistency.
 
-### E2E тесты
+### E2E Tests
 
-Проект использует Playwright для E2E тестирования:
+Project uses Playwright for E2E testing:
 
 ```bash
-# Запуск тестов
+# Run tests
 npx playwright test
 
-# Запуск с UI
+# Run with UI
 npx playwright test --ui
 
-# Отчет
+# Show report
 npx playwright show-report
 ```
 
-## Лицензия
+## License
 
 ISC

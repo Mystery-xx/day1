@@ -16,6 +16,8 @@ import com.aichat.service.FactExtractionService;
 import com.aichat.service.TaskOrchestrator;
 import com.aichat.agent.TaskAgent;
 import com.aichat.enums.TaskState;
+import com.aichat.entity.ChatSession;
+import com.aichat.repository.ChatSessionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -47,15 +49,17 @@ public class ChatController {
     private final StickyFactService stickyFactService;
     private final FactExtractionService factExtractionService;
     private final TaskOrchestrator orchestrator;
+    private final ChatSessionRepository sessionRepository;
 
     public ChatController(AiChatService chatService, ChatHistoryService historyService,
                           StickyFactService stickyFactService, FactExtractionService factExtractionService,
-                          TaskOrchestrator orchestrator) {
+                          TaskOrchestrator orchestrator, ChatSessionRepository sessionRepository) {
         this.chatService = chatService;
         this.historyService = historyService;
         this.stickyFactService = stickyFactService;
         this.factExtractionService = factExtractionService;
         this.orchestrator = orchestrator;
+        this.sessionRepository = sessionRepository;
     }
 
     @PostMapping
@@ -106,6 +110,19 @@ public class ChatController {
                         currentAgent.getClass().getSimpleName(),
                         currentState.getDisplayName(),
                         agentSystemPrompt != null ? agentSystemPrompt.length() : 0);
+                    
+                    // Emit task state update immediately after processing (in case of transition)
+                    String stateUpdateJson = mapper.writeValueAsString(Map.of(
+                        "type", "taskState",
+                        "data", Map.of(
+                            "state", currentState.name(),
+                            "displayName", currentState.getDisplayName(),
+                            "order", currentState.getOrder(),
+                            "agentClass", currentState.getAgentClass()
+                        ),
+                        "sessionId", finalSessionId
+                    ));
+                    emitter.next(stateUpdateJson);
                 } catch (Exception smEx) {
                     logger.warn("State Machine processing failed, using direct chat: {}", smEx.getMessage());
                 }
@@ -397,7 +414,8 @@ public class ChatController {
                     defaultState.name(),
                     defaultState.getDisplayName(),
                     defaultState.getOrder(),
-                    defaultState.getAgentClass()
+                    defaultState.getAgentClass(),
+                    false
                 );
                 return ResponseEntity.ok(stateDTO);
             }
@@ -406,9 +424,40 @@ public class ChatController {
                 taskState.name(),
                 taskState.getDisplayName(),
                 taskState.getOrder(),
-                taskState.getAgentClass()
+                taskState.getAgentClass(),
+                context.isPaused()
             );
             return ResponseEntity.ok(stateDTO);
+        } catch (IllegalArgumentException e) {
+            logger.warn("Session not found: {}", sessionId);
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/sessions/{sessionId}/pause")
+    public ResponseEntity<Void> pauseSession(@PathVariable String sessionId) {
+        logger.info("Pausing session: {}", sessionId);
+        try {
+            ChatSession session = sessionRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+            session.setPaused(true);
+            sessionRepository.save(session);
+            return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            logger.warn("Session not found: {}", sessionId);
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/sessions/{sessionId}/resume")
+    public ResponseEntity<Void> resumeSession(@PathVariable String sessionId) {
+        logger.info("Resuming session: {}", sessionId);
+        try {
+            ChatSession session = sessionRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+            session.setPaused(false);
+            sessionRepository.save(session);
+            return ResponseEntity.ok().build();
         } catch (IllegalArgumentException e) {
             logger.warn("Session not found: {}", sessionId);
             return ResponseEntity.notFound().build();

@@ -9,12 +9,14 @@ public class TaskStateDTO {
     private final String displayName;
     private final int order;
     private final String agentClass;
+    private final boolean paused;
 
-    public TaskStateDTO(String state, String displayName, int order, String agentClass) {
+    public TaskStateDTO(String state, String displayName, int order, String agentClass, boolean paused) {
         this.state = state;
         this.displayName = displayName;
         this.order = order;
         this.agentClass = agentClass;
+        this.paused = paused;
     }
 
     public String getState() {
@@ -31,5 +33,9 @@ public class TaskStateDTO {
 
     public String getAgentClass() {
         return agentClass;
+    }
+
+    public boolean isPaused() {
+        return paused;
     }
 }

@@ -42,8 +42,9 @@ public class PlanningAgent extends AbstractAgent {
             - Создавай структурированный план с конкретными шагами
             - Определяй критерии успешного выполнения
             - Не переходи к реализации - только планирование
-            - Когда все требования понятны, предложи перейти к реализации
-            - Тебе запрещено самому реализовывать
+            - Когда все требования понятны, напиши "[ПЕРЕХОД К EXECUTION]" и предложи перейти к реализации
+            - Если план требует доработки, напиши "[ПЕРЕХОД К PLANNING]"
+            - Тебе запрещено самому реализовывать и переходить на другие этапы
             
             Формат ответа:
             1. Понимание задачи (краткое описание)
@@ -61,11 +62,20 @@ public class PlanningAgent extends AbstractAgent {
         String aiResponse = callAiApi(context, message);
         String extractedPlan = aiResponse != null ? aiResponse.trim() : null;
         
-        return AgentResult.builder()
+        AgentResult.Builder builder = AgentResult.builder()
                 .content(extractedPlan)
                 .metadataEntry("lastAgentResponse", aiResponse)
-                .metadataEntry("draftPlan", extractedPlan)
-                .build();
+                .metadataEntry("draftPlan", extractedPlan);
+        
+        if (aiResponse != null) {
+            if (aiResponse.contains("[ПЕРЕХОД К EXECUTION]")) {
+                builder.suggestedNextState(TaskState.EXECUTION);
+            } else if (aiResponse.contains("[ПЕРЕХОД К PLANNING]")) {
+                builder.suggestedNextState(TaskState.PLANNING);
+            }
+        }
+        
+        return builder.build();
     }
     
     @Override

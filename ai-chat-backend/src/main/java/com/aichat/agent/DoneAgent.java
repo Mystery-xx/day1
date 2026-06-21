@@ -31,7 +31,9 @@ public class DoneAgent extends AbstractAgent {
     public String getSystemPrompt() {
         return """
             Задача ЗАВЕРШЕНА. Отвечай на дополнительные вопросы по готовому решению.
-            Если нужны изменения - предложи начать новый цикл планирования.
+            
+            [STATE_TRANSITION: DONE] - Если пользователь задаёт уточняющие вопросы, оставайся в DONE.
+            [STATE_TRANSITION: PLANNING] - Если нужны изменения/новая задача, предложи начать новый цикл планирования.
             """;
     }
     
@@ -42,9 +44,13 @@ public class DoneAgent extends AbstractAgent {
         String aiResponse = callAiApi(context, message);
         boolean needsRevision = userWantsChanges(message.getContent());
         
+        // Suggest PLANNING when new requirements, otherwise stay in DONE
+        TaskState nextState = needsRevision ? TaskState.PLANNING : TaskState.DONE;
+        
         return AgentResult.builder()
                 .content(aiResponse)
                 .needsRevision(needsRevision)
+                .suggestedNextState(nextState)
                 .metadataEntry("lastAgentResponse", aiResponse)
                 .build();
     }

@@ -78,10 +78,11 @@ public class AutoTransitionDetector {
     
     private Optional<TaskState> detectExecutionTransition(TaskContext context, String content) {
         // Automatic transition to VALIDATION when ExecutionAgent completes implementation
-        // No explicit user keyword required
+        // Transition happens AFTER implementation is saved, not on user keyword
         
         boolean hasImplementation = context.getImplementation() != null && !context.getImplementation().isBlank();
         
+        // Only transition if implementation exists (i.e., ExecutionAgent has completed)
         if (hasImplementation) {
             return Optional.of(TaskState.VALIDATION);
         }

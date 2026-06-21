@@ -39,6 +39,12 @@ public class ValidationAgent extends AbstractAgent {
             - Будь объективным - не принимай сторону
             - Если всё соответствует - подтверди успех
             - Если есть проблемы - перечисли конкретно
+            - Тебе запрещено реализовывать, переделывать или закрывать задачу.
+            
+            Возможные следующие состояния:
+            - DONE: если все пункты плана выполнены и тесты проходят
+            - EXECUTION: если нужны исправления в реализации
+            - PLANNING: если обнаружились новые требования или изменения в плане
             """;
     }
     
@@ -50,6 +56,7 @@ public class ValidationAgent extends AbstractAgent {
             return AgentResult.builder()
                     .content("Validation failed: Missing plan or implementation")
                     .needsRevision(true)
+                    .suggestedNextState(TaskState.EXECUTION)
                     .metadataEntry("validationStatus", ValidationResult.FAILED.name())
                     .metadataEntry("error", "Missing plan or implementation")
                     .build();
@@ -60,14 +67,34 @@ public class ValidationAgent extends AbstractAgent {
                            aiResponse.toLowerCase().contains("не соответствует") ||
                            aiResponse.toLowerCase().contains("проблема");
         
+        // Check for new requirements indicators
+        boolean hasNewRequirements = aiResponse.toLowerCase().contains("новое требование") ||
+                                    aiResponse.toLowerCase().contains("новый пункт") ||
+                                    aiResponse.toLowerCase().contains("изменение плана") ||
+                                    aiResponse.toLowerCase().contains("требуется изменение плана");
+        
         ValidationResult result = hasErrors ? ValidationResult.FAILED : ValidationResult.OK;
         
         // Extract specific issues for ExecutionAgent to fix
         String issues = hasErrors ? extractIssues(aiResponse) : "";
         
+        // Determine suggested next state
+        TaskState nextState;
+        if (!hasErrors) {
+            // All tests pass - transition to DONE
+            nextState = TaskState.DONE;
+        } else if (hasNewRequirements) {
+            // New requirements discovered - go back to PLANNING
+            nextState = TaskState.PLANNING;
+        } else {
+            // Fixes needed - go back to EXECUTION
+            nextState = TaskState.EXECUTION;
+        }
+        
         return AgentResult.builder()
                 .content(aiResponse)
                 .needsRevision(hasErrors)
+                .suggestedNextState(nextState)
                 .metadataEntry("validationStatus", result.name())
                 .metadataEntry("validationIssues", issues)
                 .metadataEntry("lastAgentResponse", aiResponse)

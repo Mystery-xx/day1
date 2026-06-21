@@ -69,6 +69,30 @@ public class TaskOrchestrator {
         ChatSession session = loadOrCreateSession(sessionId);
         TaskContext context = loadOrCreateContext(session);
         
+        // Step 1b: Check if session is paused
+        if (session.isPaused()) {
+            logger.debug("Session {} is paused, skipping agent call", sessionId);
+            return context.withMetadataEntry("lastAgentResponse", "Задача на паузе. Напиши 'продолжить' для возобновления.");
+        }
+        
+        // Step 1c: Detect pause/resume commands
+        String content = message.getContent();
+        if (content != null) {
+            String lowerContent = content.toLowerCase().trim();
+            if ("пауза".equals(lowerContent) || "приостанови".equals(lowerContent)) {
+                session.setPaused(true);
+                sessionRepository.save(session);
+                logger.debug("Session {} paused by user", sessionId);
+                return context.withMetadataEntry("lastAgentResponse", "Задача приостановлена. Напиши 'продолжить' когда будешь готов.");
+            }
+            if ("продолжить".equals(lowerContent) || "resume".equals(lowerContent)) {
+                session.setPaused(false);
+                sessionRepository.save(session);
+                logger.debug("Session {} resumed by user", sessionId);
+                return context.withMetadataEntry("lastAgentResponse", "Возобновляем работу. Где мы остановились?");
+            }
+        }
+        
         // Step 2: Get current agent based on session state
         TaskAgent currentAgent = getAgentForState(session.getTaskState());
         
@@ -82,11 +106,34 @@ public class TaskOrchestrator {
         saveContextToDb(session, updatedContext);
         
         // Step 6: Detect if transition should occur
-        Optional<TaskState> nextState = transitionDetector.detect(updatedContext, message);
+        // Priority: 1) Agent suggestion, 2) AutoTransitionDetector fallback
+        Optional<TaskState> nextState = Optional.empty();
+        
+        // Step 6a: Check for agent-suggested transition
+        Optional<TaskState> agentSuggestion = result.getSuggestedNextState();
+        if (agentSuggestion.isPresent()) {
+            TaskState suggestedState = agentSuggestion.get();
+            logger.debug("Agent {} suggested transition to {}", currentAgent.getClass().getSimpleName(), suggestedState);
+            
+            if (session.getTaskState().isValidTransition(suggestedState)) {
+                logger.debug("Transition {} -> {} validated: true", session.getTaskState(), suggestedState);
+                nextState = agentSuggestion;
+            } else {
+                logger.debug("Transition {} -> {} validated: false", session.getTaskState(), suggestedState);
+                logger.warn("Agent {} suggested invalid transition to {}, ignoring", currentAgent.getClass().getSimpleName(), suggestedState);
+            }
+        }
+        
+        // Step 6b: Fallback to AutoTransitionDetector if no valid agent suggestion
+        if (!nextState.isPresent()) {
+            logger.debug("No agent suggestion, using AutoTransitionDetector");
+            nextState = transitionDetector.detect(updatedContext, message);
+        }
         
         // Step 7: If transition detected, update state and save
         if (nextState.isPresent()) {
             TaskState targetState = nextState.get();
+            logger.debug("Executing transition {} -> {}", session.getTaskState(), targetState);
             if (session.getTaskState().isValidTransition(targetState)) {
                 transitionToInternal(session, targetState, "Auto-transition detected from message");
                 updatedContext = updatedContext.withState(targetState);
@@ -219,10 +266,11 @@ public class TaskOrchestrator {
         
         if (existingContext.isPresent()) {
             TaskContext context = TaskContext.fromEntity(existingContext.get());
-            // Ensure context has correct session ID and state
+            // Ensure context has correct session ID, state, and paused flag
             return new TaskContext.Builder(context)
                 .sessionId(session.getSessionId())
                 .currentState(session.getTaskState())
+                .withPaused(session.isPaused())
                 .build();
         }
         
@@ -230,6 +278,7 @@ public class TaskOrchestrator {
         return TaskContext.builder()
             .sessionId(session.getSessionId())
             .currentState(session.getTaskState())
+            .withPaused(session.isPaused())
             .build();
     }
     

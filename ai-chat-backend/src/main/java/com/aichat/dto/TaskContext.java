@@ -18,6 +18,7 @@ public class TaskContext {
     private List<ChatMessageDTO> history;
     private Map<String, Object> metadata;
     private boolean needsRevision;        // Done → Planning flag
+    private final boolean paused;         // Pause flag
 
     private TaskContext(Builder builder) {
         this.sessionId = builder.sessionId;
@@ -28,6 +29,7 @@ public class TaskContext {
         this.history = builder.history != null ? new ArrayList<>(builder.history) : new ArrayList<>();
         this.metadata = builder.metadata != null ? new HashMap<>(builder.metadata) : new HashMap<>();
         this.needsRevision = builder.needsRevision;
+        this.paused = builder.paused;
     }
 
     public String getSessionId() {
@@ -60,6 +62,10 @@ public class TaskContext {
 
     public boolean isNeedsRevision() {
         return needsRevision;
+    }
+
+    public boolean isPaused() {
+        return paused;
     }
 
     /**
@@ -117,6 +123,15 @@ public class TaskContext {
     }
 
     /**
+     * Create a new TaskContext with paused flag.
+     */
+    public TaskContext withPaused(boolean paused) {
+        return new Builder(this)
+            .withPaused(paused)
+            .build();
+    }
+
+    /**
      * Create a new TaskContext with updated current state.
      */
     public TaskContext withState(TaskState state) {
@@ -165,6 +180,7 @@ public class TaskContext {
         entity.setImplementation(this.implementation);
         entity.setValidation(this.validation != null ? this.validation.name() : null);
         entity.setNeedsRevision(this.needsRevision);
+        entity.setPaused(this.paused);
 
         // Convert history List<ChatMessageDTO> to Map<String, String>
         if (this.history != null && !this.history.isEmpty()) {
@@ -232,6 +248,7 @@ public class TaskContext {
             .withHistory(history)
             .withMetadata(metadata)
             .withNeedsRevision(entity.getNeedsRevision() != null && entity.getNeedsRevision())
+            .withPaused(entity.isPaused())
             .build();
     }
 
@@ -244,11 +261,13 @@ public class TaskContext {
         private List<ChatMessageDTO> history;
         private Map<String, Object> metadata;
         private boolean needsRevision;
+        private boolean paused;
 
         public Builder() {
             this.history = new ArrayList<>();
             this.metadata = new HashMap<>();
             this.needsRevision = false;
+            this.paused = false;
         }
 
         public Builder(TaskContext existing) {
@@ -260,6 +279,7 @@ public class TaskContext {
             this.history = existing.history != null ? new ArrayList<>(existing.history) : new ArrayList<>();
             this.metadata = existing.metadata != null ? new HashMap<>(existing.metadata) : new HashMap<>();
             this.needsRevision = existing.needsRevision;
+            this.paused = existing.paused;
         }
 
         public Builder sessionId(String sessionId) {
@@ -299,6 +319,11 @@ public class TaskContext {
 
         public Builder withNeedsRevision(boolean needsRevision) {
             this.needsRevision = needsRevision;
+            return this;
+        }
+
+        public Builder withPaused(boolean paused) {
+            this.paused = paused;
             return this;
         }
 

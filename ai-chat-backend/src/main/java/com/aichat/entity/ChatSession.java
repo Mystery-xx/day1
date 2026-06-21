@@ -36,6 +36,9 @@ public class ChatSession {
     @Column(name = "title", length = 500)
     private String title;
     
+    @Column(name = "paused", nullable = false)
+    private boolean paused = false;
+    
     public ChatSession() {
     }
     
@@ -85,6 +88,14 @@ public class ChatSession {
     
     public void setTitle(String title) {
         this.title = title;
+    }
+    
+    public boolean isPaused() {
+        return paused;
+    }
+    
+    public void setPaused(boolean paused) {
+        this.paused = paused;
     }
     
     @PrePersist
