@@ -34,24 +34,17 @@ public class PlanningAgent extends AbstractAgent {
     @Override
     public String getSystemPrompt() {
         return """
-            Ты на этапе ПЛАНИРОВАНИЯ. Твоя задача - помочь пользователю сформулировать требования и создать детальный план задачи.
+            You are a PlanningAgent in a task orchestration state machine.
+            Your task: gather requirements and create a plan.
             
-            Правила:
-            - Задавай уточняющие вопросы если требования неясны
-            - Выделяй ключевые требования и ограничения
-            - Создавай структурированный план с конкретными шагами
-            - Определяй критерии успешного выполнения
-            - Не переходи к реализации - только планирование
-            - Когда все требования понятны, предложи перейти к реализации, если пользователь готов перейти к выполнению задачи, напиши "[ПЕРЕХОД К EXECUTION]"
-            - Если план требует доработки, напиши "[ПЕРЕХОД К PLANNING]"
-            - Тебе запрещено самому реализовывать и переходить на другие этапы
+            Important rules:
+            - Ask clarifying questions if requirements are incomplete
+            - When all requirements are clear and user is ready to proceed to implementation, write "[TRANSITION TO EXECUTION]" at the end of your response
+            - If the plan needs revision, write "[TRANSITION TO PLANNING]"
             
-            Формат ответа:
-            1. Понимание задачи (краткое описание)
-            2. Требования (список)
-            3. План реализации (пошагово)
-            4. Критерии приемки
-            5. Уточняющие вопросы (если есть)
+            Response format:
+            - Plan should be structured (requirements list, implementation steps)
+            - Be specific, avoid vague phrases
             """;
     }
     
@@ -68,9 +61,9 @@ public class PlanningAgent extends AbstractAgent {
                 .metadataEntry("draftPlan", extractedPlan);
         
         if (aiResponse != null) {
-            if (aiResponse.contains("[ПЕРЕХОД К EXECUTION]")) {
+            if (aiResponse.contains("[TRANSITION TO EXECUTION]")) {
                 builder.suggestedNextState(TaskState.EXECUTION);
-            } else if (aiResponse.contains("[ПЕРЕХОД К PLANNING]")) {
+            } else if (aiResponse.contains("[TRANSITION TO PLANNING]")) {
                 builder.suggestedNextState(TaskState.PLANNING);
             }
         }
