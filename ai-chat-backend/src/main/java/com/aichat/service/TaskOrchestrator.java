@@ -33,31 +33,29 @@ public class TaskOrchestrator {
     private final AgentFactory agentFactory;
     private final TaskContextRepository contextRepository;
     private final ChatSessionRepository sessionRepository;
-    private final AutoTransitionDetector transitionDetector;
     private final ChatHistoryService historyService;
     
     public TaskOrchestrator(AgentFactory agentFactory,
                            TaskContextRepository contextRepository,
                            ChatSessionRepository sessionRepository,
-                           AutoTransitionDetector transitionDetector,
                            ChatHistoryService historyService) {
         this.agentFactory = agentFactory;
         this.contextRepository = contextRepository;
         this.sessionRepository = sessionRepository;
-        this.transitionDetector = transitionDetector;
         this.historyService = historyService;
     }
     
     /**
      * Process a message with full stateful context management.
+     * Transitions are driven ONLY by agent-suggested next state.
      * Flow:
      * 1. Load/create TaskContext from DB
      * 2. Get current agent
      * 3. Call agent.process() → AgentResult
      * 4. Update context with result
      * 5. Save context to DB
-     * 6. Call TransitionStrategy.detectTransition()
-     * 7. If transition detected → update state, save, log
+     * 6. Check agent's suggestedNextState (no fallback)
+     * 7. If valid suggestion → update state, save, log
      * 8. Return updated context
      * 
      * @param sessionId Session ID
@@ -105,11 +103,10 @@ public class TaskOrchestrator {
         // Step 5: Save context to DB
         saveContextToDb(session, updatedContext);
         
-        // Step 6: Detect if transition should occur
-        // Priority: 1) Agent suggestion, 2) AutoTransitionDetector fallback
+        // Step 6: Check agent-suggested transition (ONLY mechanism - no fallback)
         Optional<TaskState> nextState = Optional.empty();
         
-        // Step 6a: Check for agent-suggested transition
+        // Check for agent-suggested transition
         Optional<TaskState> agentSuggestion = result.getSuggestedNextState();
         if (agentSuggestion.isPresent()) {
             TaskState suggestedState = agentSuggestion.get();
@@ -123,23 +120,16 @@ public class TaskOrchestrator {
                 logger.warn("Agent {} suggested invalid transition to {}, ignoring", currentAgent.getClass().getSimpleName(), suggestedState);
             }
         }
+        // No fallback: if agent provides no suggestion or invalid transition, stay in current state
         
-        // Step 6b: Fallback to AutoTransitionDetector if no valid agent suggestion
-        if (!nextState.isPresent()) {
-            logger.debug("No agent suggestion, using AutoTransitionDetector");
-            nextState = transitionDetector.detect(updatedContext, message);
-        }
-        
-        // Step 7: If transition detected, update state and save
+        // Step 7: Execute transition if agent suggested valid state
         if (nextState.isPresent()) {
             TaskState targetState = nextState.get();
             logger.debug("Executing transition {} -> {}", session.getTaskState(), targetState);
-            if (session.getTaskState().isValidTransition(targetState)) {
-                transitionToInternal(session, targetState, "Auto-transition detected from message");
-                updatedContext = updatedContext.withState(targetState);
-                // Save context with updated state
-                saveContextToDb(session, updatedContext);
-            }
+            transitionToInternal(session, targetState, "Agent-suggested transition");
+            updatedContext = updatedContext.withState(targetState);
+            // Save context with updated state
+            saveContextToDb(session, updatedContext);
         }
         
         // Step 8: Return updated context
