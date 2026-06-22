@@ -114,6 +114,7 @@ public class AiChatService {
                             Map<String, String> message = (Map<String, String>) choices.get(0).get("message");
                             if (message != null) {
                                 String content = message.get("content");
+                                logger.debug("Received content from AI: \n{}", content);
                                 String model = (String) response.get("model");
                                 Map<String, Object> usage = (Map<String, Object>) response.get("usage");
                                 ChatResponse chatResponse = new ChatResponse(content, null, model, usage);

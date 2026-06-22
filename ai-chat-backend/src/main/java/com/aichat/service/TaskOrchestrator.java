@@ -3,6 +3,7 @@ package com.aichat.service;
 import com.aichat.agent.AgentFactory;
 import com.aichat.agent.TaskAgent;
 import com.aichat.dto.AgentResult;
+import com.aichat.dto.AgentResponseWithResult;
 import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.TaskContext;
 import com.aichat.entity.ChatSession;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -33,16 +35,16 @@ public class TaskOrchestrator {
     private final AgentFactory agentFactory;
     private final TaskContextRepository contextRepository;
     private final ChatSessionRepository sessionRepository;
-    private final ChatHistoryService historyService;
+    private final ChatHistoryService chatHistoryService;
     
     public TaskOrchestrator(AgentFactory agentFactory,
                            TaskContextRepository contextRepository,
                            ChatSessionRepository sessionRepository,
-                           ChatHistoryService historyService) {
+                           ChatHistoryService chatHistoryService) {
         this.agentFactory = agentFactory;
         this.contextRepository = contextRepository;
         this.sessionRepository = sessionRepository;
-        this.historyService = historyService;
+        this.chatHistoryService = chatHistoryService;
     }
     
     /**
@@ -56,18 +58,18 @@ public class TaskOrchestrator {
      * 5. Save context to DB
      * 6. Check agent's suggestedNextState (no fallback)
      * 7. If valid suggestion → update state, save, log
-     * 8. Return updated context
+     * 8. Return wrapper with context and agent result
      * 
      * @param sessionId Session ID
      * @param message User message to process
-     * @return Updated task context
+     * @return AgentResponseWithResult containing task context and agent result
      */
-    public TaskContext processMessage(String sessionId, ChatMessageDTO message) {
+    public synchronized AgentResponseWithResult processMessage(String sessionId, ChatMessageDTO message) {
         // Step 1: Load or create session and context from DB
         ChatSession session = loadOrCreateSession(sessionId);
         TaskContext context = loadOrCreateContext(session);
         
-        // Step 1b: Check if session is paused
+      /*  // Step 1b: Check if session is paused
         if (session.isPaused()) {
             logger.debug("Session {} is paused, skipping agent call", sessionId);
             return context.withMetadataEntry("lastAgentResponse", "Задача на паузе. Напиши 'продолжить' для возобновления.");
@@ -90,7 +92,7 @@ public class TaskOrchestrator {
                 return context.withMetadataEntry("lastAgentResponse", "Возобновляем работу. Где мы остановились?");
             }
         }
-        
+        */
         // Step 2: Get current agent based on session state
         TaskAgent currentAgent = getAgentForState(session.getTaskState());
         
@@ -127,7 +129,9 @@ public class TaskOrchestrator {
             TaskState targetState = nextState.get();
             logger.debug("Executing transition {} -> {}", session.getTaskState(), targetState);
             
-            // Auto-transition PLANNING → EXECUTION: invoke ExecutionAgent immediately
+            // Auto-transition PLANNING → EXECUTION: save plan and transition state
+            // NOTE: ExecutionAgent will be invoked on the NEXT user message, not immediately
+            // This prevents duplicate AI calls in a single request
             if (session.getTaskState() == TaskState.PLANNING && targetState == TaskState.EXECUTION) {
                 // 1. Save plan in context
                 updatedContext = updatedContext.withPlan(result.getContent());
@@ -136,38 +140,21 @@ public class TaskOrchestrator {
                 transitionToInternal(session, TaskState.EXECUTION, "Plan approved by user");
                 updatedContext = updatedContext.withState(TaskState.EXECUTION);
                 
-                // 3. Invoke ExecutionAgent immediately (same request)
-                TaskAgent executionAgent = getAgentForState(TaskState.EXECUTION);
+                logger.info("Auto-transition PLANNING → EXECUTION completed, will invoke ExecutionAgent on next message");
                 
-                // Create message for ExecutionAgent with the approved plan
-                ChatMessageDTO execMessage = new ChatMessageDTO(
-                    "user",
-                    "Реализуй утвержденный план"
-                );
-                
-                AgentResult execResult = executionAgent.process(updatedContext, execMessage);
-                
-                // 4. Update context with ExecutionAgent result
-                updatedContext = updateContextWithResult(updatedContext, execResult, TaskState.EXECUTION);
-                
-                // Save context with implementation
-                saveContextToDb(session, updatedContext);
-                
-                logger.info("Auto-transition PLANNING → EXECUTION completed, ExecutionAgent invoked");
-                
-                // Return ExecutionAgent's response (implementation, not transition marker)
-                return updatedContext;
+                // Return PlanningAgent's response (plan approval confirmation)
+                // Frontend will show this and wait for user's next message to trigger ExecutionAgent
+            } else {
+                // Standard transition for other states
+                transitionToInternal(session, targetState, "Agent-suggested transition");
+                updatedContext = updatedContext.withState(targetState);
             }
-            
-            // Standard transition for other states
-            transitionToInternal(session, targetState, "Agent-suggested transition");
-            updatedContext = updatedContext.withState(targetState);
-            // Save context with updated state
-            saveContextToDb(session, updatedContext);
         }
         
-        // Step 8: Return updated context
-        return updatedContext;
+        saveContextToDb(session, updatedContext);
+        
+        // Step 8: Return wrapper with context and agent result
+        return new AgentResponseWithResult(updatedContext, result);
     }
     
     /**
@@ -182,7 +169,7 @@ public class TaskOrchestrator {
         
         if (session == null) {
             logger.info("Session not found in getCurrentAgent, auto-creating: {}", sessionId);
-            String newSessionId = historyService.createSession();
+            String newSessionId = chatHistoryService.createSession();
             session = sessionRepository.findBySessionId(newSessionId)
                 .orElseThrow(() -> new IllegalStateException("Failed to create session"));
         }
@@ -273,7 +260,7 @@ public class TaskOrchestrator {
         
         if (session == null) {
             logger.info("Session not found, auto-creating: {}", sessionId);
-            String newSessionId = historyService.createSession();
+            String newSessionId = chatHistoryService.createSession();
             session = sessionRepository.findBySessionId(newSessionId)
                 .orElseThrow(() -> new IllegalStateException("Failed to create session"));
             logger.info("Auto-created session {} with PLANNING state", sessionId);
@@ -286,23 +273,25 @@ public class TaskOrchestrator {
      * Load or create task context for a session.
      */
     private TaskContext loadOrCreateContext(ChatSession session) {
+        List<ChatMessageDTO> recentHistory = chatHistoryService.getLimitedHistoryWithSummary(session.getSessionId(), 10);
+        
         Optional<TaskContextEntity> existingContext = contextRepository.findBySessionId(session.getId());
         
         if (existingContext.isPresent()) {
             TaskContext context = TaskContext.fromEntity(existingContext.get());
-            // Ensure context has correct session ID, state, and paused flag
             return new TaskContext.Builder(context)
                 .sessionId(session.getSessionId())
                 .currentState(session.getTaskState())
                 .withPaused(session.isPaused())
+                .withHistory(recentHistory)
                 .build();
         }
         
-        // Create new context
         return TaskContext.builder()
             .sessionId(session.getSessionId())
             .currentState(session.getTaskState())
             .withPaused(session.isPaused())
+            .withHistory(recentHistory)
             .build();
     }
     
@@ -317,28 +306,28 @@ public class TaskOrchestrator {
      * Save context to database.
      */
     private void saveContextToDb(ChatSession session, TaskContext context) {
-        TaskContextEntity entity = context.toEntity();
-        entity.setSession(session);
+        Optional<TaskContextEntity> existingOpt = contextRepository.findBySessionId(session.getId());
         
-        // Check if context already exists for this session
-        Optional<TaskContextEntity> existing = contextRepository.findBySessionId(session.getId());
-        
-        if (existing.isPresent()) {
-            // Update existing context
-            TaskContextEntity existingEntity = existing.get();
+        if (existingOpt.isPresent()) {
+            TaskContextEntity existingEntity = existingOpt.get();
+            TaskContextEntity entity = context.toEntity();
+            
             existingEntity.setApprovedPlan(entity.getApprovedPlan());
             existingEntity.setImplementation(entity.getImplementation());
             existingEntity.setValidation(entity.getValidation());
-            existingEntity.setHistory(entity.getHistory());
-            existingEntity.setMetadata(entity.getMetadata());
             existingEntity.setNeedsRevision(entity.getNeedsRevision());
+            existingEntity.setPaused(entity.isPaused());
+            existingEntity.setMetadata(entity.getMetadata());
+            existingEntity.setHistory(entity.getHistory());
             existingEntity.setUpdatedAt(Instant.now());
-            contextRepository.save(existingEntity);
+            
+            contextRepository.saveAndFlush(existingEntity);
         } else {
-            // Create new context
+            TaskContextEntity entity = context.toEntity();
+            entity.setSession(session);
             entity.setCreatedAt(Instant.now());
             entity.setUpdatedAt(Instant.now());
-            contextRepository.save(entity);
+            contextRepository.saveAndFlush(entity);
         }
     }
     

@@ -9,6 +9,7 @@ import com.aichat.dto.SessionCreateResponse;
 import com.aichat.dto.StickyFactDTO;
 import com.aichat.dto.TaskStateDTO;
 import com.aichat.dto.TaskContext;
+import com.aichat.dto.AgentResponseWithResult;
 import com.aichat.service.AiChatService;
 import com.aichat.service.ChatHistoryService;
 import com.aichat.service.StickyFactService;
@@ -98,170 +99,157 @@ public class ChatController {
         
         return Flux.create(emitter -> {
             TaskAgent currentAgent = null;
+            String agentSystemPrompt = null;
+            String agentResponseContent = null;
+            
+            // Save user message FIRST before calling AI (so it's preserved even if AI fails)
+            long startTime = System.currentTimeMillis();
+            final String sessionIdForSave = finalSessionId;
             try {
-                String agentSystemPrompt = null;
-                try {
-                    ChatMessageDTO userMessage = new ChatMessageDTO("user", request.getMessage());
-                    TaskContext taskContext = orchestrator.processMessage(finalSessionId, userMessage);
-                    
-                    // Get system prompt AFTER processMessage - this ensures we get the correct agent's prompt
-                    // (e.g., after auto-transition PLANNING→EXECUTION, we get ExecutionAgent's prompt, not PlanningAgent's)
-                    currentAgent = orchestrator.getCurrentAgent(finalSessionId);
-                    agentSystemPrompt = currentAgent.getSystemPrompt();
-                    
-                    TaskState currentState = orchestrator.getContext(finalSessionId).getCurrentState();
-                    
-                    logger.info("State Machine: Agent={}, State={}, SystemPromptLength={}",
-                        currentAgent.getClass().getSimpleName(),
-                        currentState.getDisplayName(),
-                        agentSystemPrompt != null ? agentSystemPrompt.length() : 0);
-                    
-                    // Emit task state update immediately after processing (in case of transition)
-                    String stateUpdateJson = mapper.writeValueAsString(Map.of(
-                        "type", "taskState",
-                        "data", Map.of(
-                            "state", currentState.name(),
-                            "displayName", currentState.getDisplayName(),
-                            "order", currentState.getOrder(),
-                            "agentClass", currentState.getAgentClass()
-                        ),
-                        "sessionId", finalSessionId
-                    ));
-                    emitter.next(stateUpdateJson);
-                } catch (Exception smEx) {
-                    logger.warn("State Machine processing failed, using direct chat: {}", smEx.getMessage());
-                    // Fallback: try to get system prompt from current agent even after failure
-                    if (agentSystemPrompt == null) {
-                        try {
-                            TaskAgent fallbackAgent = orchestrator.getCurrentAgent(finalSessionId);
-                            if (fallbackAgent != null) {
-                                agentSystemPrompt = fallbackAgent.getSystemPrompt();
-                                logger.info("Fallback: got system prompt from agent: {}",
-                                    fallbackAgent.getClass().getSimpleName());
-                            }
-                        } catch (Exception fallbackEx) {
-                            logger.warn("Could not get fallback system prompt: {}", fallbackEx.getMessage());
-                        }
-                    }
-                }
+                historyService.saveMessage(
+                    sessionIdForSave,
+                    "user",
+                    request.getMessage(),
+                    null, null, null, null,
+                    null,
+                    request.getSettings() != null ? request.getSettings().getProvider() : null,
+                    request.getSettings() != null ? request.getSettings().getTemperature() : null,
+                    request.getSettings() != null ? request.getSettings().getMaxTokens() : null
+                );
+            } catch (Exception saveEx) {
+                logger.error("Failed to save user message: {}", saveEx.getMessage());
+            }
+            
+            try {
+                ChatMessageDTO userMessage = new ChatMessageDTO("user", request.getMessage());
+                AgentResponseWithResult responseWithResult = orchestrator.processMessage(finalSessionId, userMessage);
                 
-                // Immediately emit debugRequest + sessionId (with system prompt for debug)
-                Map<String, Object> debugRequest = chatService.buildDebugRequest(request, agentSystemPrompt);
+                agentResponseContent = responseWithResult.getContent();
                 
-                logger.debug("Emitting debug request immediately: {}", debugRequest);
-                String debugRequestJson = mapper.writeValueAsString(Map.of(
-                    "type", "debugRequest", 
-                    "data", debugRequest,
+                // Get system prompt AFTER processMessage - this ensures we get the correct agent's prompt
+                // (e.g., after auto-transition PLANNING→EXECUTION, we get ExecutionAgent's prompt, not PlanningAgent's)
+                currentAgent = orchestrator.getCurrentAgent(finalSessionId);
+                agentSystemPrompt = currentAgent.getSystemPrompt();
+                
+                TaskState currentState = responseWithResult.getTaskContext().getCurrentState();
+                
+                logger.info("State Machine: Agent={}, State={}, SystemPromptLength={}, AgentResponseLength={}",
+                    currentAgent.getClass().getSimpleName(),
+                    currentState.getDisplayName(),
+                    agentSystemPrompt != null ? agentSystemPrompt.length() : 0,
+                    agentResponseContent != null ? agentResponseContent.length() : 0);
+                
+                // Emit task state update immediately after processing (in case of transition)
+                String stateUpdateJson = mapper.writeValueAsString(Map.of(
+                    "type", "taskState",
+                    "data", Map.of(
+                        "state", currentState.name(),
+                        "displayName", currentState.getDisplayName(),
+                        "order", currentState.getOrder(),
+                        "agentClass", currentState.getAgentClass()
+                    ),
                     "sessionId", finalSessionId
                 ));
-                emitter.next(debugRequestJson);
-                
-                // Track start time
-                long startTime = System.currentTimeMillis();
-                final String sessionIdForSave = finalSessionId;
-                
-                // Then call AI API and emit response when ready
-                chatService.sendMessage(request, agentSystemPrompt)
-                    .publishOn(Schedulers.boundedElastic())
-                    .subscribe(
-                        response -> {
-                            try {
-                                logger.debug("Emitting response: {}", response);
-                                
-                                // Save user message to DB
-                                historyService.saveMessage(
-                                    sessionIdForSave,
-                                    "user",
-                                    request.getMessage(),
-                                    null, null, null, null,
-                                    null,
-                                    request.getSettings() != null ? request.getSettings().getProvider() : null,
-                                    request.getSettings() != null ? request.getSettings().getTemperature() : null,
-                                    request.getSettings() != null ? request.getSettings().getMaxTokens() : null
-                                );
-                                
-                                // Save assistant response to DB if successful
-                                if (response.getContent() != null && response.getError() == null) {
-                                    Integer responseTime = (int) (System.currentTimeMillis() - startTime);
-                                    Integer promptTokens = response.getUsage() != null ? 
-                                        (Integer) response.getUsage().get("prompt_tokens") : null;
-                                    Integer completionTokens = response.getUsage() != null ? 
-                                        (Integer) response.getUsage().get("completion_tokens") : null;
-                                    Integer totalTokens = response.getUsage() != null ? 
-                                        (Integer) response.getUsage().get("total_tokens") : null;
-                                    
-                                    historyService.saveMessage(
-                                        sessionIdForSave,
-                                        "assistant",
-                                        response.getContent(),
-                                        response.getModel(),
-                                        promptTokens,
-                                        completionTokens,
-                                        totalTokens,
-                                        responseTime,
-                                        request.getSettings() != null ? request.getSettings().getProvider() : null,
-                                        request.getSettings() != null ? request.getSettings().getTemperature() : null,
-                                        request.getSettings() != null ? request.getSettings().getMaxTokens() : null
-                                    );
-                                    
-                                    // Calculate session totals
-                                    int[] sessionTotals = historyService.getSessionTokenUsage(sessionIdForSave);
-                                    response.setSessionTotalPromptTokens(sessionTotals[0]);
-                                    response.setSessionTotalCompletionTokens(sessionTotals[1]);
-                                    response.setSessionTotalTokens(sessionTotals[2]);
-                                    
-                                    // Generate summary if needed and capture debug info
-                                    // Skip summary generation for StickyFacts strategy (uses facts instead)
-                                    String provider = request.getSettings() != null ? request.getSettings().getProvider() : null;
-                                    String model = request.getSettings() != null ? request.getSettings().getModel() : null;
-                                    String strategy = request.getSettings() != null ? request.getSettings().getContextStrategy() : null;
-                                    boolean shouldGenerateSummary = !"stickyFacts".equalsIgnoreCase(strategy);
-                                    var summaryResult = shouldGenerateSummary ? chatService.generateSummaryIfNeeded(sessionIdForSave, provider, model) : null;
-                                    if (summaryResult != null) {
-                                        response.setDebugSummaryRequest(summaryResult.getRequest());
-                                        response.setDebugSummaryResponse(summaryResult.getResponse());
-                                    }
-                                    
-                                    // Add sticky facts for debug panel (always include, even if empty)
-                                    List<StickyFactDTO> responseStickyFacts = stickyFactService.getFacts(sessionIdForSave);
-                                    Map<String, Object> stickyFactsDebug = new HashMap<>();
-                                    stickyFactsDebug.put("stickyFacts", responseStickyFacts != null ? responseStickyFacts : List.of());
-                                    response.setDebugStickyFacts(stickyFactsDebug);
-                                    
-                                    // Flag to indicate sticky facts may have been updated (for auto-extraction)
-                                    // Frontend should refresh if this flag is true or if facts changed
-                                    response.setStickyFactsUpdated(true);
-                                }
-                                
-                                // Send full ChatResponse with debug fields + sessionId
-                                String responseJson = mapper.writeValueAsString(Map.of(
-                                    "type", "response", 
-                                    "data", response,
-                                    "sessionId", sessionIdForSave
-                                ));
-                                emitter.next(responseJson);
-                                emitter.complete();
-                            } catch (JsonProcessingException e) {
-                                emitter.error(e);
-                            }
-                        },
-                        error -> {
-                            try {
-                                logger.error("Error in streaming call", error);
-                                String errorJson = mapper.writeValueAsString(Map.of(
-                                    "type", "error", 
-                                    "data", Map.of("error", error.getMessage()),
-                                    "sessionId", sessionIdForSave
-                                ));
-                                emitter.next(errorJson);
-                                emitter.complete();
-                            } catch (JsonProcessingException ex) {
-                                emitter.error(ex);
-                            }
+                emitter.next(stateUpdateJson);
+            } catch (Exception smEx) {
+                logger.warn("State Machine processing failed: {}", smEx.getMessage());
+                // Fallback: try to get system prompt from current agent even after failure
+                if (agentSystemPrompt == null) {
+                    try {
+                        TaskAgent fallbackAgent = orchestrator.getCurrentAgent(finalSessionId);
+                        if (fallbackAgent != null) {
+                            agentSystemPrompt = fallbackAgent.getSystemPrompt();
+                            logger.info("Fallback: got system prompt from agent: {}",
+                                fallbackAgent.getClass().getSimpleName());
                         }
+                    } catch (Exception fallbackEx) {
+                        logger.warn("Could not get fallback system prompt: {}", fallbackEx.getMessage());
+                    }
+                }
+            }
+            
+            // Handle orchestrator response
+            if (agentResponseContent != null) {
+                // Strip transition markers from displayed content
+                String displayContent = stripTransitionMarkers(agentResponseContent);
+                logger.debug("Agent response: raw_length={}, display_length={}", agentResponseContent.length(), displayContent.length());
+                
+                ChatResponse agentResponse = new ChatResponse();
+                agentResponse.setContent(displayContent);
+                agentResponse.setModel(request.getSettings() != null ? request.getSettings().getModel() : null);
+                agentResponse.setUsage(Map.of("prompt_tokens", 0, "completion_tokens", 0, "total_tokens", 0));
+                
+                logger.debug("Using agent's response directly (no second AI call)");
+                
+                try {
+                    
+                    Integer responseTime = (int) (System.currentTimeMillis() - startTime);
+                    historyService.saveMessage(
+                        sessionIdForSave,
+                        "assistant",
+                        agentResponse.getContent(),
+                        agentResponse.getModel(),
+                        0, 0, 0,
+                        responseTime,
+                        request.getSettings() != null ? request.getSettings().getProvider() : null,
+                        request.getSettings() != null ? request.getSettings().getTemperature() : null,
+                        request.getSettings() != null ? request.getSettings().getMaxTokens() : null
                     );
-            } catch (JsonProcessingException e) {
-                emitter.error(e);
+                    
+                    int[] sessionTotals = historyService.getSessionTokenUsage(sessionIdForSave);
+                    agentResponse.setSessionTotalPromptTokens(sessionTotals[0]);
+                    agentResponse.setSessionTotalCompletionTokens(sessionTotals[1]);
+                    agentResponse.setSessionTotalTokens(sessionTotals[2]);
+                    
+                    String provider = request.getSettings() != null ? request.getSettings().getProvider() : null;
+                    String model = request.getSettings() != null ? request.getSettings().getModel() : null;
+                    String strategy = request.getSettings() != null ? request.getSettings().getContextStrategy() : null;
+                    boolean shouldGenerateSummary = !"stickyFacts".equalsIgnoreCase(strategy);
+                    var summaryResult = shouldGenerateSummary ? chatService.generateSummaryIfNeeded(sessionIdForSave, provider, model) : null;
+                    if (summaryResult != null) {
+                        agentResponse.setDebugSummaryRequest(summaryResult.getRequest());
+                        agentResponse.setDebugSummaryResponse(summaryResult.getResponse());
+                    }
+                    
+                    List<StickyFactDTO> responseStickyFacts = stickyFactService.getFacts(sessionIdForSave);
+                    Map<String, Object> stickyFactsDebug = new HashMap<>();
+                    stickyFactsDebug.put("stickyFacts", responseStickyFacts != null ? responseStickyFacts : List.of());
+                    agentResponse.setDebugStickyFacts(stickyFactsDebug);
+                    agentResponse.setStickyFactsUpdated(true);
+                    
+                    String responseJson = mapper.writeValueAsString(Map.of(
+                        "type", "response", 
+                        "data", agentResponse,
+                        "sessionId", sessionIdForSave
+                    ));
+                    emitter.next(responseJson);
+                    emitter.complete();
+                } catch (JsonProcessingException e) {
+                    emitter.error(e);
+                }
+            } else {
+                // Orchestrator failed and returned null content - do NOT make a second AI call
+                // This prevents duplicate API calls when the orchestrator already attempted one
+                logger.error("Orchestrator processMessage returned null content - skipping fallback to prevent duplicate AI call. Session: {}", finalSessionId);
+                
+                // Emit error message to user instead of making second AI call
+                ChatResponse errorResponse = new ChatResponse();
+                errorResponse.setContent("Sorry, I encountered an error processing your request. Please try again.");
+                errorResponse.setModel(request.getSettings() != null ? request.getSettings().getModel() : null);
+                errorResponse.setUsage(Map.of("prompt_tokens", 0, "completion_tokens", 0, "total_tokens", 0));
+                errorResponse.setError("Orchestrator processing failed - see backend logs for details");
+                
+                try {
+                    String errorJson = mapper.writeValueAsString(Map.of(
+                        "type", "response",
+                        "data", errorResponse,
+                        "sessionId", finalSessionId
+                    ));
+                    emitter.next(errorJson);
+                    emitter.complete();
+                } catch (JsonProcessingException e) {
+                    emitter.error(e);
+                }
             }
         });
     }
@@ -481,5 +469,25 @@ public class ChatController {
             logger.warn("Session not found: {}", sessionId);
             return ResponseEntity.notFound().build();
         }
+    }
+    
+    /**
+     * Strip internal transition markers from agent response before displaying to user.
+     * These markers are used for state machine transitions but should not be visible.
+     */
+    private String stripTransitionMarkers(String content) {
+        if (content == null) {
+            return null;
+        }
+        return content
+            .replaceAll("\\[ПЕРЕХОД К EXECUTION\\]", "")
+            .replaceAll("\\[TRANSITION TO EXECUTION\\]", "")
+            .replaceAll("\\[ПЕРЕХОД К PLANNING\\]", "")
+            .replaceAll("\\[TRANSITION TO PLANNING\\]", "")
+            .replaceAll("\\[ПЕРЕХОД К VALIDATION\\]", "")
+            .replaceAll("\\[TRANSITION TO VALIDATION\\]", "")
+            .replaceAll("\\[ПЕРЕХОД К DONE\\]", "")
+            .replaceAll("\\[TRANSITION TO DONE\\]", "")
+            .trim();
     }
 }

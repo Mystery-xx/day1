@@ -70,7 +70,7 @@ public class ExecutionAgent extends AbstractAgent {
     
     @Override
     public AgentResult process(TaskContext context, ChatMessageDTO message) {
-        logger.info("ExecutionAgent processing for session {}", context.getSessionId());
+        logger.info("ExecutionAgent processing for session {} and message {}", context.getSessionId(), message.getContent());
         
         if (context.getApprovedPlan() == null) {
             return AgentResult.builder()

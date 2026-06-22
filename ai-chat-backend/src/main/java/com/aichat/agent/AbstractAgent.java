@@ -14,6 +14,7 @@ import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Base abstract agent with common AI API call logic.
@@ -48,6 +49,9 @@ public abstract class AbstractAgent implements TaskAgent {
         String model = properties.getModel();
         
         try {
+            getLogger().info("Send message to AI: {}", requestBody.entrySet().stream()
+                    .map(entry -> entry.getKey() + ":" + entry.getValue())
+                    .collect(Collectors.joining(", ")));
             Map<String, Object> response = webClient.post()
                     .uri("/chat/completions")
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -58,17 +62,27 @@ public abstract class AbstractAgent implements TaskAgent {
                     .block(Duration.ofSeconds(120));
             
             if (response != null) {
+                getLogger().info("Full AI API response: {}", objectMapper.writeValueAsString(response));
+                
                 List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
                 if (choices != null && !choices.isEmpty()) {
-                    Map<String, String> aiMessage = (Map<String, String>) choices.get(0).get("message");
+                    Map<String, Object> aiMessage = (Map<String, Object>) choices.get(0).get("message");
                     if (aiMessage != null) {
-                        return aiMessage.get("content");
+                        Object contentObj = aiMessage.get("content");
+                        String content = contentObj != null ? contentObj.toString() : null;
+                        
+                        getLogger().info("Content from AI: \n{}", content);
+                        if (content == null) {
+                            getLogger().warn("AI returned null content for agent {}, using fallback message", getClass().getSimpleName());
+                            return "I received your message but couldn't generate a response. Please try again.";
+                        }
+                        return content;
                     }
                 }
             }
             
             getLogger().warn("Empty response from AI API for agent {}", getClass().getSimpleName());
-            return "I received your message but couldn't generate a response.";
+            return "I received your message but couldn't generate a response. Please try again.";
             
         } catch (Exception e) {
             getLogger().error("Error calling AI API for agent {}", getClass().getSimpleName(), e);
