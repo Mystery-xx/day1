@@ -55,7 +55,7 @@ ai:
     gpustack-url: ${GPUSTACK_API_URL:}
     huggingface-url: ${HUGGINGFACE_API_URL:}
     huggingface-token: ${HUGGINGFACE_TOKEN:}
-    model: ${AI_MODEL:qwen3.5-397b-a17b}
+    model: ${AI_MODEL:default-chat}
     temperature: ${AI_TEMPERATURE:0.7}
     max-tokens: ${AI_MAX_TOKENS:32768}
     top-p: ${AI_TOP_P:1.0}

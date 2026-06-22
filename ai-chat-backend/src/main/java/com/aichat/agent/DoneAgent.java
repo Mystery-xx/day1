@@ -66,19 +66,30 @@ public class DoneAgent extends AbstractAgent {
     }
     
     @Override
-    protected void addContextMessages(List<Map<String, String>> messages, TaskContext context) {
-        StringBuilder summary = new StringBuilder("=== ЗАВЕРШЁННАЯ ЗАДАЧА ===\n");
-        if (context.getApprovedPlan() != null) {
-            summary.append("План: ").append(context.getApprovedPlan()).append("\n");
-        }
-        if (context.getImplementation() != null) {
-            summary.append("Реализация: ").append(context.getImplementation()).append("\n");
+    protected Map<String, Object> buildRequestBody(String systemPrompt, String userMessage, TaskContext context) {
+        Map<String, Object> requestBody = super.buildRequestBody(systemPrompt, userMessage, context);
+        
+        if (context.getApprovedPlan() != null || context.getImplementation() != null) {
+            List<Map<String, String>> messages = (List<Map<String, String>>) requestBody.get("messages");
+            if (!messages.isEmpty()) {
+                Map<String, String> systemMessage = messages.get(0);
+                String currentContent = systemMessage.get("content");
+                StringBuilder summary = new StringBuilder("\n\n=== ЗАВЕРШЁННАЯ ЗАДАЧА ===\n");
+                if (context.getApprovedPlan() != null) {
+                    summary.append("План: ").append(context.getApprovedPlan()).append("\n");
+                }
+                if (context.getImplementation() != null) {
+                    summary.append("Реализация: ").append(context.getImplementation()).append("\n");
+                }
+                systemMessage.put("content", currentContent + summary.toString());
+            }
         }
         
-        Map<String, String> summaryMsg = new HashMap<>();
-        summaryMsg.put("role", "system");
-        summaryMsg.put("content", summary.toString());
-        messages.add(summaryMsg);
+        return requestBody;
+    }
+    
+    @Override
+    protected void addContextMessages(List<Map<String, String>> messages, TaskContext context) {
     }
     
     private boolean userWantsChanges(String message) {

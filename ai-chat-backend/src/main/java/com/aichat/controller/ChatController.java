@@ -412,10 +412,8 @@ public class ChatController {
         logger.info("Fetching state for session: {}", sessionId);
         try {
             TaskContext context = orchestrator.getContext(sessionId);
-            logger.info("Current state: {}", context.getCurrentState().getDisplayName());
             if (context == null || context.getCurrentState() == null) {
                 logger.warn("Session context or state not found: {}", sessionId);
-                // Return default PLANNING state for sessions without task context
                 TaskState defaultState = TaskState.PLANNING;
                 TaskStateDTO stateDTO = new TaskStateDTO(
                     defaultState.name(),
@@ -426,6 +424,7 @@ public class ChatController {
                 );
                 return ResponseEntity.ok(stateDTO);
             }
+            logger.info("Current state: {}", context.getCurrentState().getDisplayName());
             TaskState taskState = context.getCurrentState();
             TaskStateDTO stateDTO = new TaskStateDTO(
                 taskState.name(),

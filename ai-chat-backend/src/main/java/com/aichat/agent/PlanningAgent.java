@@ -112,14 +112,20 @@ public class PlanningAgent extends AbstractAgent {
 
     @Override
     protected void addContextMessages(List<Map<String, String>> messages, TaskContext context) {
-        // Add history if available
+        logger.info("addContextMessages called. History size: {}", context.getHistory() != null ? context.getHistory().size() : "null");
         if (context.getHistory() != null && !context.getHistory().isEmpty()) {
-            for (ChatMessageDTO msg : context.getHistory()) {
+            List<ChatMessageDTO> history = context.getHistory();
+            int limit = history.size() - 1;
+            logger.info("Adding {} history messages", limit);
+            for (int i = 0; i < limit; i++) {
+                ChatMessageDTO msg = history.get(i);
                 Map<String, String> msgMap = new HashMap<>();
                 msgMap.put("role", msg.getRole());
                 msgMap.put("content", msg.getContent());
                 messages.add(msgMap);
             }
+        } else {
+            logger.info("No history to add");
         }
     }
 }

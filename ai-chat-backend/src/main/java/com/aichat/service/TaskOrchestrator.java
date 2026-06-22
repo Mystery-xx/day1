@@ -215,9 +215,11 @@ public class TaskOrchestrator {
         updated = updated.withMetadataEntry("lastAgentResponse", result.getContent());
         
         if (currentState == TaskState.PLANNING && result.getContent() != null) {
-            updated = updated.withPlan(result.getContent());
+            String cleanPlan = stripTransitionMarkers(result.getContent());
+            updated = updated.withPlan(cleanPlan);
         } else if (currentState == TaskState.EXECUTION && result.getContent() != null) {
-            updated = updated.withImplementation(result.getContent());
+            String cleanImplementation = stripTransitionMarkers(result.getContent());
+            updated = updated.withImplementation(cleanImplementation);
         } else if (currentState == TaskState.VALIDATION) {
             Object validationResult = result.getMetadata().get("validationStatus");
             if (validationResult != null) {
@@ -357,5 +359,15 @@ public class TaskOrchestrator {
             session.getSessionId(),
             reason
         );
+    }
+    
+    /**
+     * Remove transition markers from AI response content.
+     */
+    private String stripTransitionMarkers(String content) {
+        if (content == null || content.isBlank()) {
+            return content;
+        }
+        return content.replaceAll("\\[ПЕРЕХОД К \\w+\\]", "").trim();
     }
 }

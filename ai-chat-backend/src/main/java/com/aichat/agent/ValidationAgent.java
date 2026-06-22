@@ -31,7 +31,7 @@ public class ValidationAgent extends AbstractAgent {
     @Override
     public String getSystemPrompt() {
         return """
-            Ты на этапе ВАЛИДАЦИИ. Твоя задача - объективно проверить реализацию против плана.
+            Ты на этапе ВАЛИДАЦИИ. Твоя задача - объективно проверить реализацию против плана и желаний пользователя
             
             Правила:
             - Сравни реализацию с каждым пунктом плана
@@ -63,15 +63,30 @@ public class ValidationAgent extends AbstractAgent {
         }
         
         String aiResponse = callAiApi(context, message);
-        boolean hasErrors = aiResponse.toLowerCase().contains("ошибка") || 
-                           aiResponse.toLowerCase().contains("не соответствует") ||
-                           aiResponse.toLowerCase().contains("проблема");
         
-        // Check for new requirements indicators
+        boolean aiRecommendsPlanning = aiResponse.toLowerCase().contains("состояние `planning`") ||
+                                       aiResponse.toLowerCase().contains("перейти в состояние `planning`") ||
+                                       aiResponse.toLowerCase().contains("необходимо перейти в состояние planning");
+        
         boolean hasNewRequirements = aiResponse.toLowerCase().contains("новое требование") ||
                                     aiResponse.toLowerCase().contains("новый пункт") ||
                                     aiResponse.toLowerCase().contains("изменение плана") ||
-                                    aiResponse.toLowerCase().contains("требуется изменение плана");
+                                    aiResponse.toLowerCase().contains("требуется изменение плана") ||
+                                    aiResponse.toLowerCase().contains("обновить план") ||
+                                    aiResponse.toLowerCase().contains("скорректировать план") ||
+                                    aiRecommendsPlanning;
+        
+        boolean hasErrors = aiResponse.toLowerCase().contains("ошибка") || 
+                           aiResponse.toLowerCase().contains("не соответствует") ||
+                           aiResponse.toLowerCase().contains("проблема") ||
+                           aiResponse.toLowerCase().contains("несоответствие") ||
+                           aiResponse.toLowerCase().contains("❌");
+        
+        if (!hasErrors && !hasNewRequirements) {
+            hasErrors = aiResponse.toLowerCase().contains("выявленные несоответствия") ||
+                       aiResponse.toLowerCase().contains("диспропорция") ||
+                       aiResponse.toLowerCase().contains("не выполнено");
+        }
         
         ValidationResult result = hasErrors ? ValidationResult.FAILED : ValidationResult.OK;
         
@@ -118,18 +133,28 @@ public class ValidationAgent extends AbstractAgent {
     }
     
     @Override
+    protected Map<String, Object> buildRequestBody(String systemPrompt, String userMessage, TaskContext context) {
+        Map<String, Object> requestBody = super.buildRequestBody(systemPrompt, userMessage, context);
+        
+        if (context.getApprovedPlan() != null && !context.getApprovedPlan().isBlank()) {
+            List<Map<String, String>> messages = (List<Map<String, String>>) requestBody.get("messages");
+            if (!messages.isEmpty()) {
+                Map<String, String> systemMessage = messages.get(0);
+                String currentContent = systemMessage.get("content");
+                String planSection = "\n\n=== УТВЕРЖДЁННЫЙ ПЛАН ===\n" + context.getApprovedPlan();
+                
+                if (context.getImplementation() != null && !context.getImplementation().isBlank()) {
+                    planSection += "\n\n=== РЕАЛИЗАЦИЯ ===\n" + context.getImplementation();
+                }
+                
+                systemMessage.put("content", currentContent + planSection);
+            }
+        }
+        
+        return requestBody;
+    }
+    
+    @Override
     protected void addContextMessages(List<Map<String, String>> messages, TaskContext context) {
-        if (context.getApprovedPlan() != null) {
-            Map<String, String> planMsg = new HashMap<>();
-            planMsg.put("role", "system");
-            planMsg.put("content", "=== ПЛАН ===\n" + context.getApprovedPlan());
-            messages.add(planMsg);
-        }
-        if (context.getImplementation() != null) {
-            Map<String, String> implMsg = new HashMap<>();
-            implMsg.put("role", "system");
-            implMsg.put("content", "=== РЕАЛИЗАЦИЯ ===\n" + context.getImplementation());
-            messages.add(implMsg);
-        }
     }
 }

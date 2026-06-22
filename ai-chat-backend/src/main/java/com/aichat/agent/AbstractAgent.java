@@ -30,7 +30,7 @@ public abstract class AbstractAgent implements TaskAgent {
         this.objectMapper = new ObjectMapper();
         
         HttpClient httpClient = HttpClient.create()
-                .responseTimeout(Duration.ofSeconds(120));
+                .responseTimeout(Duration.ofSeconds(300));
         
         this.webClient = WebClient.builder()
                 .baseUrl(properties.getProviderBaseUrl())
