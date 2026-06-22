@@ -34,7 +34,6 @@ public class ValidationAgent extends AbstractAgent {
             Ты на этапе ВАЛИДАЦИИ. Твоя задача - объективно проверить реализацию против плана и желаний пользователя
             
             Правила:
-            - Сравни реализацию с каждым пунктом плана
             - Выявляй конкретные несоответствия
             - Будь объективным - не принимай сторону
             - Если всё соответствует - подтверди успех
@@ -45,6 +44,17 @@ public class ValidationAgent extends AbstractAgent {
             - DONE: если все пункты плана выполнены и тесты проходят
             - EXECUTION: если нужны исправления в реализации
             - PLANNING: если обнаружились новые требования или изменения в плане
+            
+            ВАЖНО: В конце ответа добавь ОДНУ из строк:
+            - [ПЕРЕХОД К DONE] - если всё готово и можно завершать
+            - [ПЕРЕХОД К EXECUTION] - если нужны исправления реализации
+            - [ПЕРЕХОД К PLANNING] - если нужны изменения в плане или новые требования
+            
+            Формат ответа:
+            1. Сравнение с планом (пункт за пунктом)
+            2. Выявленные несоответствия (если есть)
+            3. Рекомендация по следующему состоянию
+            4. Маркер перехода
             """;
     }
     
@@ -64,56 +74,50 @@ public class ValidationAgent extends AbstractAgent {
         
         String aiResponse = callAiApi(context, message);
         
-        boolean aiRecommendsPlanning = aiResponse.toLowerCase().contains("состояние `planning`") ||
-                                       aiResponse.toLowerCase().contains("перейти в состояние `planning`") ||
-                                       aiResponse.toLowerCase().contains("необходимо перейти в состояние planning");
-        
-        boolean hasNewRequirements = aiResponse.toLowerCase().contains("новое требование") ||
-                                    aiResponse.toLowerCase().contains("новый пункт") ||
-                                    aiResponse.toLowerCase().contains("изменение плана") ||
-                                    aiResponse.toLowerCase().contains("требуется изменение плана") ||
-                                    aiResponse.toLowerCase().contains("обновить план") ||
-                                    aiResponse.toLowerCase().contains("скорректировать план") ||
-                                    aiRecommendsPlanning;
-        
-        boolean hasErrors = aiResponse.toLowerCase().contains("ошибка") || 
-                           aiResponse.toLowerCase().contains("не соответствует") ||
-                           aiResponse.toLowerCase().contains("проблема") ||
-                           aiResponse.toLowerCase().contains("несоответствие") ||
-                           aiResponse.toLowerCase().contains("❌");
-        
-        if (!hasErrors && !hasNewRequirements) {
-            hasErrors = aiResponse.toLowerCase().contains("выявленные несоответствия") ||
-                       aiResponse.toLowerCase().contains("диспропорция") ||
-                       aiResponse.toLowerCase().contains("не выполнено");
-        }
-        
-        ValidationResult result = hasErrors ? ValidationResult.FAILED : ValidationResult.OK;
-        
-        // Extract specific issues for ExecutionAgent to fix
-        String issues = hasErrors ? extractIssues(aiResponse) : "";
-        
-        // Determine suggested next state
-        TaskState nextState;
-        if (!hasErrors) {
-            // All tests pass - transition to DONE
-            nextState = TaskState.DONE;
-        } else if (hasNewRequirements) {
-            // New requirements discovered - go back to PLANNING
-            nextState = TaskState.PLANNING;
-        } else {
-            // Fixes needed - go back to EXECUTION
-            nextState = TaskState.EXECUTION;
-        }
-        
-        return AgentResult.builder()
+        AgentResult.Builder builder = AgentResult.builder()
                 .content(aiResponse)
-                .needsRevision(hasErrors)
-                .suggestedNextState(nextState)
-                .metadataEntry("validationStatus", result.name())
-                .metadataEntry("validationIssues", issues)
-                .metadataEntry("lastAgentResponse", aiResponse)
-                .build();
+                .metadataEntry("lastAgentResponse", aiResponse);
+        
+        if (aiResponse != null) {
+            boolean hasTransitionToDone = aiResponse.contains("[ПЕРЕХОД К DONE]");
+            boolean hasTransitionToExec = aiResponse.contains("[ПЕРЕХОД К EXECUTION]");
+            boolean hasTransitionToPlanning = aiResponse.contains("[ПЕРЕХОД К PLANNING]");
+            
+            logger.info("ValidationAgent checking transition markers: toDone={}, toExec={}, toPlanning={}", 
+                hasTransitionToDone, hasTransitionToExec, hasTransitionToPlanning);
+            logger.info("AI response length: {}", aiResponse.length());
+            
+            TaskState nextState = TaskState.DONE;
+            boolean needsRevision = false;
+            
+            if (hasTransitionToDone) {
+                logger.info("ValidationAgent suggesting transition to DONE");
+                nextState = TaskState.DONE;
+                needsRevision = false;
+            } else if (hasTransitionToPlanning) {
+                logger.info("ValidationAgent suggesting transition to PLANNING");
+                nextState = TaskState.PLANNING;
+                needsRevision = true;
+            } else if (hasTransitionToExec) {
+                logger.info("ValidationAgent suggesting transition to EXECUTION");
+                nextState = TaskState.EXECUTION;
+                needsRevision = true;
+            } else {
+                logger.warn("No transition marker found in ValidationAgent response, defaulting to EXECUTION");
+                nextState = TaskState.EXECUTION;
+                needsRevision = true;
+            }
+            
+            builder.suggestedNextState(nextState);
+            builder.needsRevision(needsRevision);
+            builder.metadataEntry("validationStatus", needsRevision ? ValidationResult.FAILED.name() : ValidationResult.OK.name());
+            
+            if (needsRevision) {
+                builder.metadataEntry("validationIssues", aiResponse);
+            }
+        }
+        
+        return builder.build();
     }
     
     private String extractIssues(String validationResponse) {
