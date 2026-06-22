@@ -41,6 +41,15 @@ public abstract class AbstractAgent implements TaskAgent {
     
     protected String callAiApi(TaskContext context, ChatMessageDTO message) {
         String systemPrompt = getSystemPrompt();
+        
+        if (properties.getInvariants() != null && !properties.getInvariants().isEmpty()) {
+            String invariantsSection = "\n\nИНВАРИАНТЫ (строго обязательно):\n" +
+                    properties.getInvariants().stream()
+                            .map(inv -> "- " + inv)
+                            .collect(Collectors.joining("\n"));
+            systemPrompt += invariantsSection;
+        }
+        
         String userMessage = message.getContent();
         
         Map<String, Object> requestBody = buildRequestBody(systemPrompt, userMessage, context);

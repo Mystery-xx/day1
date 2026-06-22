@@ -22,6 +22,7 @@ public class AiChatProperties {
     private Double presencePenalty = 0.0;
     private List<String> stop;
     private Integer historyLimit = 10;
+    private List<String> invariants;
 
     public String getProvider() {
         return provider;
@@ -141,5 +142,13 @@ public class AiChatProperties {
 
     public void setHistoryLimit(Integer historyLimit) {
         this.historyLimit = historyLimit;
+    }
+
+    public List<String> getInvariants() {
+        return invariants;
+    }
+
+    public void setInvariants(List<String> invariants) {
+        this.invariants = invariants;
     }
 }
