@@ -27,14 +27,14 @@ docker-compose up --build
 # Открываем http://localhost:5173
 ```
 
-### Порт 8085 (альтернативный)
+### Порт 8081 (альтернативный)
 
 ```bash
-# Копируем конфигурацию для порта 8085
-cp .env-8085 .env
+# Копируем конфигурацию для порта 8081
+cp .env-8081 .env
 
 # Запускаем
-docker-compose -f docker-compose-8085.yml up --build
+docker-compose -f docker-compose-8081.yml up --build
 
 # Открываем http://localhost:8086
 ```
@@ -44,7 +44,7 @@ docker-compose -f docker-compose-8085.yml up --build
 ```
 ┌─────────────┐     ┌──────────┐     ┌─────────────┐     ┌─────────┐
 │   Browser   │────▶│  React   │────▶│ Spring Boot │────▶│  AI API │
-│  :5173/:8086│     │  :80     │     │  :8082/:8085│     │         │
+│  :5173/:8086│     │  :80     │     │  :8082/:8081│     │         │
 └─────────────┘     └──────────┘     └─────────────┘     └─────────┘
                           │                │
                           └──────┬─────────┘
@@ -197,9 +197,9 @@ day1/
 │   ├── package.json
 │   └── Dockerfile
 ├── docker-compose.yml
-├── docker-compose-8085.yml
+├── docker-compose-8081.yml
 ├── .env.example
-├── .env-8085
+├── .env-8081
 ├── AGENTS.md
 └── README.md
 ```
@@ -212,10 +212,10 @@ day1/
 
 ## Troubleshooting
 
-### Backend не запускается на порту 8085
-Проверьте SERVER_PORT в docker-compose-8085.yml:
+### Backend не запускается на порту 8081
+Проверьте SERVER_PORT в docker-compose-8081.yml:
 ```bash
-docker-compose -f docker-compose-8085.yml config | grep SERVER_PORT
+docker-compose -f docker-compose-8081.yml config | grep SERVER_PORT
 ```
 
 ### Таймаут подключения к MCP

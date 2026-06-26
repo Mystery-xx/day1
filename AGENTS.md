@@ -23,32 +23,32 @@ docker-compose up --build
 # 4. Open http://localhost:5173 in your browser
 ```
 
-### Alternative Deployment (Port 8085)
+### Alternative Deployment (Port 8081)
 
 ```bash
-# 1. Copy environment configuration for port 8085
-cp .env-8085 .env
+# 1. Copy environment configuration for port 8081
+cp .env-8081 .env
 
 # 2. Edit .env and configure API settings
 
 # 3. Build and start containers
-docker-compose -f docker-compose-8085.yml up --build
+docker-compose -f docker-compose-8081.yml up --build
 
 # 4. Open http://localhost:8086 in your browser
-#    Backend API: http://localhost:8085
+#    Backend API: http://localhost:8081
 ```
 
 To stop:
 ```bash
 docker-compose down
-# or for port 8085:
-docker-compose -f docker-compose-8085.yml down
+# or for port 8081:
+docker-compose -f docker-compose-8081.yml down
 ```
 
 ## Architecture
 
 ```
-Browser (:5173 or :8086) → React → Vite proxy /api → Spring Boot (:8082 or :8085) → AI API
+Browser (:5173 or :8086) → React → Vite proxy /api → Spring Boot (:8082 or :8081) → AI API
 ```
 
 - **Backend**: Spring Boot 3.2, Java 17, WebClient (reactive)
@@ -64,7 +64,7 @@ Browser (:5173 or :8086) → React → Vite proxy /api → Spring Boot (:8082 or
 | `ai-chat-backend/src/main/resources/application.yml` | Backend config |
 | `ai-chat-frontend/vite.config.js` | Vite proxy config |
 | `docker-compose.yml` | Docker orchestration (port 8082) |
-| `docker-compose-8085.yml` | Docker orchestration (port 8085) |
+| `docker-compose-8081.yml` | Docker orchestration (port 8081) |
 
 ## Environment Variables
 
@@ -147,11 +147,11 @@ MCP operations are logged with detailed request/response information:
 - Network: ai-chat-network
 - Volume: h2-data
 
-### docker-compose-8085.yml (Alternative - Port 8085)
-- Backend: Port 8085
+### docker-compose-8081.yml (Alternative - Port 8081)
+- Backend: Port 8081
 - Frontend: Port 8086
-- Network: ai-chat-network-8085
-- Volume: h2-data-8085
+- Network: ai-chat-network-8081
+- Volume: h2-data-8081
 
 ## Gotchas
 
@@ -169,8 +169,8 @@ MCP operations are logged with detailed request/response information:
 
 ```bash
 docker-compose up --build
-# or for port 8085:
-docker-compose -f docker-compose-8085.yml up --build
+# or for port 8081:
+docker-compose -f docker-compose-8081.yml up --build
 ```
 
 This is required because:
@@ -212,7 +212,7 @@ day1/
 │   ├── package.json          # NPM dependencies
 │   └── Dockerfile
 ├── docker-compose.yml        # Default deployment
-├── docker-compose-8085.yml   # Alternative deployment
+├── docker-compose-8081.yml   # Alternative deployment
 ├── .env.example              # Environment template
 ├── .env                      # Environment config (gitignored)
 └── AGENTS.md                 # This file
@@ -225,10 +225,10 @@ day1/
 
 ## Troubleshooting
 
-### Backend won't start on port 8085
+### Backend won't start on port 8081
 Check if SERVER_PORT environment variable is set:
 ```bash
-docker-compose -f docker-compose-8085.yml config | grep SERVER_PORT
+docker-compose -f docker-compose-8081.yml config | grep SERVER_PORT
 ```
 
 ### MCP connection timeout
@@ -236,7 +236,7 @@ From Docker containers, use `host.docker.internal` instead of `localhost` or `12
 
 ### Tool calling not working
 1. Ensure MCP server is connected: `GET /api/mcp/servers/{id}/tools`
-2. Check backend logs: `docker logs ai-chat-backend-8085 | grep "MCP"`
+2. Check backend logs: `docker logs ai-chat-backend-8081 | grep "MCP"`
 3. Verify AI model supports tool calling (qwen3.6-27b works, qwen3.5-397b-a17b may loop)
 
 ### Frontend can't connect to backend
