@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 8082
   address: 0.0.0.0
   tomcat:
     async-request-timeout: 120000
@@ -48,3 +48,19 @@ logging:
   level:
     com.aichat: DEBUG
     org.springframework.web: INFO
+
+  ai:
+    mcp:
+      client:
+        enabled: true
+        name: ai-chat-mcp
+        toolcallback:
+          enabled: true
+
+spring.main:
+  allow-bean-definition-overriding: true
+  web-application-type: servlet
+
+spring.ai:
+  retry:
+    enabled: false

@@ -2,6 +2,7 @@ package com.aichat.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
+import java.util.List;
 
 public class ChatResponse {
     private String content;
@@ -35,6 +36,12 @@ public class ChatResponse {
     
     @JsonProperty("sessionTotalTokens")
     private Integer sessionTotalTokens;
+    
+    @JsonProperty("toolCalls")
+    private List<Map<String, Object>> toolCalls;
+    
+    @JsonProperty("toolResults")
+    private List<Map<String, Object>> toolResults;
 
     public ChatResponse() {}
 
@@ -160,5 +167,21 @@ public class ChatResponse {
 
     public void setSessionTotalTokens(Integer sessionTotalTokens) {
         this.sessionTotalTokens = sessionTotalTokens;
+    }
+
+    public List<Map<String, Object>> getToolCalls() {
+        return toolCalls;
+    }
+
+    public void setToolCalls(List<Map<String, Object>> toolCalls) {
+        this.toolCalls = toolCalls;
+    }
+
+    public List<Map<String, Object>> getToolResults() {
+        return toolResults;
+    }
+
+    public void setToolResults(List<Map<String, Object>> toolResults) {
+        this.toolResults = toolResults;
     }
 }

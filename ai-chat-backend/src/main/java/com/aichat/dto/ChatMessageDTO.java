@@ -17,6 +17,8 @@ public class ChatMessageDTO {
     private Integer maxTokens;
     private Instant createdAt;
     private String summary;
+    private String toolCallsJson;
+    private String toolResultsJson;
     
     public ChatMessageDTO() {
     }
@@ -131,5 +133,21 @@ public class ChatMessageDTO {
     
     public void setSummary(String summary) {
         this.summary = summary;
+    }
+
+    public String getToolCallsJson() {
+        return toolCallsJson;
+    }
+
+    public void setToolCallsJson(String toolCallsJson) {
+        this.toolCallsJson = toolCallsJson;
+    }
+
+    public String getToolResultsJson() {
+        return toolResultsJson;
+    }
+
+    public void setToolResultsJson(String toolResultsJson) {
+        this.toolResultsJson = toolResultsJson;
     }
 }

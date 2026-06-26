@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useMcp } from '../hooks/useMcp'
 
 const STRATEGY_OPTIONS = [
   { value: 'summary', label: 'Summary', description: 'Keep recent messages plus an AI-generated summary of older history' },
@@ -7,6 +8,8 @@ const STRATEGY_OPTIONS = [
 ]
 
 function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory, sessions, onSessionSelect, onDeleteSession, sessionsLoading, onFactsRefreshed }) {
+  const { servers, connectedServer, tools, status, error, fetchServers, addServer, connect, disconnect } = useMcp()
+  
   const handleChange = (key, value) => {
     onSettingsChange({
       ...settings,
@@ -24,6 +27,15 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
   const [newFactValue, setNewFactValue] = useState('')
   const [factsData, setFactsData] = useState([])
   const [autoExtractEnabled, setAutoExtractEnabled] = useState(true)
+  
+  // MCP server management state
+  const [showAddServer, setShowAddServer] = useState(false)
+  const [newServerName, setNewServerName] = useState('')
+  const [newServerUrl, setNewServerUrl] = useState('')
+  const [selectedServerId, setSelectedServerId] = useState(null)
+  const [testToolName, setTestToolName] = useState('')
+  const [testToolArgs, setTestToolArgs] = useState('{}')
+  const [testResult, setTestResult] = useState(null)
 
   // Load sticky facts for current session when strategy or session changes.
   useEffect(() => {
@@ -53,6 +65,11 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
       })
     return () => { cancelled = true }
   }, [sessionId, settings.contextStrategy])
+  
+  // Fetch MCP servers on mount
+  useEffect(() => {
+    fetchServers()
+  }, [fetchServers])
 
   const facts = settings.stickyFacts || {}
   const showWindowInput = settings.contextStrategy === 'slidingWindow' || settings.contextStrategy === 'stickyFacts'
@@ -166,6 +183,86 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
       ...prev,
       autoExtractFacts: enabled
     }))
+  }
+  
+  // MCP server management handlers
+  const handleAddServer = async () => {
+    if (!newServerName.trim() || !newServerUrl.trim()) return
+    try {
+      await addServer({
+        name: newServerName.trim(),
+        url: newServerUrl.trim(),
+        transportType: 'SSE'
+      })
+      setNewServerName('')
+      setNewServerUrl('')
+      setShowAddServer(false)
+      fetchServers()
+    } catch (err) {
+      console.error('Error adding server:', err)
+    }
+  }
+  
+  const handleConnect = async (serverId) => {
+    try {
+      setSelectedServerId(serverId)
+      await connect(serverId)
+    } catch (err) {
+      console.error('Error connecting:', err)
+    }
+  }
+  
+  const handleDisconnect = async (serverId) => {
+    try {
+      await disconnect(serverId)
+      setSelectedServerId(null)
+      setTestResult(null)
+    } catch (err) {
+      console.error('Error disconnecting:', err)
+    }
+  }
+  
+  const handleTestTool = async (serverId, toolName) => {
+    if (!serverId || !toolName) return
+    setTestResult({ loading: true })
+    try {
+      const args = JSON.parse(testToolArgs || '{}')
+      const response = await fetch(`/api/mcp/servers/${serverId}/tools?tool=${encodeURIComponent(toolName)}&args=${encodeURIComponent(JSON.stringify(args))}`)
+      if (response.ok) {
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let result = null
+        
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            if (line.startsWith('data:')) {
+              try {
+                const data = JSON.parse(line.slice(5))
+                if (data.type === 'result' || data.type === 'complete') {
+                  result = data.data
+                }
+              } catch (e) {
+                // Non-JSON data
+              }
+            }
+          }
+        }
+        
+        setTestResult({ success: true, data: result })
+      } else {
+        setTestResult({ success: false, error: 'Tool invocation failed' })
+      }
+    } catch (err) {
+      setTestResult({ success: false, error: err.message })
+    }
   }
 
   return (
@@ -529,6 +626,278 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
         )}
 
         <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
+          <label>MCP Servers</label>
+          
+          {/* Server List */}
+          <div style={{ marginTop: '10px' }}>
+            {servers && servers.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {servers.map((server) => (
+                  <div
+                    key={server.id}
+                    style={{
+                      padding: '10px',
+                      border: `1px solid ${connectedServer?.id === server.id ? '#4CAF50' : '#e0e0e0'}`,
+                      borderRadius: '6px',
+                      background: connectedServer?.id === server.id ? '#f0f9f0' : '#fff',
+                      marginBottom: '8px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div>
+                        <div style={{ fontWeight: '600', fontSize: '14px' }}>{server.name}</div>
+                        <div style={{ fontSize: '12px', color: '#666' }}>{server.url}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {connectedServer?.id === server.id ? (
+                          <button
+                            onClick={() => handleDisconnect(server.id)}
+                            disabled={status === 'disconnecting'}
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              cursor: status === 'disconnecting' ? 'not-allowed' : 'pointer',
+                              borderRadius: '4px',
+                              border: '1px solid #f44336',
+                              background: status === 'disconnecting' ? '#ccc' : '#f44336',
+                              color: 'white'
+                            }}
+                          >
+                            {status === 'disconnecting' ? '...' : 'Disconnect'}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleConnect(server.id)}
+                            disabled={status === 'connecting'}
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              cursor: status === 'connecting' ? 'not-allowed' : 'pointer',
+                              borderRadius: '4px',
+                              border: '1px solid #2196F3',
+                              background: status === 'connecting' ? '#ccc' : '#2196F3',
+                              color: 'white'
+                            }}
+                          >
+                            {status === 'connecting' ? '...' : 'Connect'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Connection Status */}
+                    {connectedServer?.id === server.id && (
+                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #e0e0e0' }}>
+                        <div style={{ fontSize: '12px', color: '#4CAF50', marginBottom: '8px', fontWeight: '600' }}>
+                          ✓ Connected
+                        </div>
+                        
+                        {/* Tool List */}
+                        {tools && tools.length > 0 ? (
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>
+                              Available Tools ({tools.length})
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {tools.map((tool, index) => (
+                                <div
+                                  key={index}
+                                  style={{
+                                    padding: '10px',
+                                    border: '1px solid #e0e0e0',
+                                    borderRadius: '4px',
+                                    background: '#fafafa'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                    <div style={{ fontWeight: '600', fontSize: '13px', color: '#333' }}>
+                                      {tool.name}
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        setTestToolName(tool.name)
+                                        setTestToolArgs('{}')
+                                        setTestResult(null)
+                                        handleTestTool(server.id, tool.name)
+                                      }}
+                                      style={{
+                                        padding: '4px 8px',
+                                        fontSize: '11px',
+                                        cursor: 'pointer',
+                                        borderRadius: '4px',
+                                        border: '1px solid #ff9800',
+                                        background: '#fff',
+                                        color: '#ff9800'
+                                      }}
+                                      title="Test this tool (debugging)"
+                                    >
+                                      🧪 Test
+                                    </button>
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>
+                                    {tool.description}
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#999' }}>
+                                    <strong>Parameters:</strong>
+                                    <pre style={{
+                                      margin: '4px 0 0 0',
+                                      padding: '6px',
+                                      background: '#f5f5f5',
+                                      borderRadius: '4px',
+                                      fontSize: '10px',
+                                      overflow: 'auto',
+                                      maxHeight: '100px'
+                                    }}>
+                                      {tool.parameters}
+                                    </pre>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            
+                            {/* Test Result */}
+                            {testResult && (
+                              <div style={{
+                                marginTop: '12px',
+                                padding: '10px',
+                                border: `1px solid ${testResult.success ? '#4CAF50' : '#f44336'}`,
+                                borderRadius: '4px',
+                                background: testResult.success ? '#e8f5e9' : '#ffebee'
+                              }}>
+                                <div style={{ fontWeight: '600', fontSize: '12px', marginBottom: '6px' }}>
+                                  {testResult.loading ? '⏳ Running...' : (testResult.success ? '✓ Success' : '✗ Error')}
+                                </div>
+                                {!testResult.loading && testResult.data && (
+                                  <pre style={{
+                                    margin: 0,
+                                    padding: '6px',
+                                    background: '#fff',
+                                    borderRadius: '4px',
+                                    fontSize: '11px',
+                                    overflow: 'auto',
+                                    maxHeight: '200px'
+                                  }}>
+                                    {JSON.stringify(testResult.data, null, 2)}
+                                  </pre>
+                                )}
+                                {!testResult.loading && testResult.error && (
+                                  <div style={{ fontSize: '12px', color: '#f44336' }}>
+                                    {testResult.error}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '12px', color: '#999', fontStyle: 'italic' }}>
+                            No tools available
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: '10px', textAlign: 'center', color: '#999', fontSize: '13px' }}>
+                No MCP servers configured
+              </div>
+            )}
+          </div>
+          
+          {/* Add Server Form */}
+          <div style={{ marginTop: '12px' }}>
+            {showAddServer ? (
+              <div style={{ padding: '12px', border: '1px solid #e0e0e0', borderRadius: '6px', background: '#f9f9f9' }}>
+                <div style={{ marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="Server name"
+                    value={newServerName}
+                    onChange={(e) => setNewServerName(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc', marginBottom: '8px' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Server URL (e.g., http://localhost:3000/sse)"
+                    value={newServerUrl}
+                    onChange={(e) => setNewServerUrl(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={handleAddServer}
+                    disabled={!newServerName.trim() || !newServerUrl.trim()}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '13px',
+                      cursor: newServerName.trim() && newServerUrl.trim() ? 'pointer' : 'not-allowed',
+                      borderRadius: '4px',
+                      border: '1px solid #4CAF50',
+                      background: newServerName.trim() && newServerUrl.trim() ? '#4CAF50' : '#ccc',
+                      color: 'white',
+                      fontWeight: '500'
+                    }}
+                  >
+                    Add Server
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowAddServer(false)
+                      setNewServerName('')
+                      setNewServerUrl('')
+                    }}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      borderRadius: '4px',
+                      border: '1px solid #999',
+                      background: '#fff',
+                      color: '#666'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowAddServer(true)}
+                style={{
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  border: '1px solid #2196F3',
+                  background: '#fff',
+                  color: '#2196F3',
+                  width: '100%'
+                }}
+              >
+                + Add MCP Server
+              </button>
+            )}
+          </div>
+          
+          {/* Connection Error */}
+          {error && (
+            <div style={{
+              marginTop: '12px',
+              padding: '10px',
+              border: '1px solid #f44336',
+              borderRadius: '4px',
+              background: '#ffebee',
+              color: '#f44336',
+              fontSize: '13px'
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
+        </div>
+
+        <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
           <label>Управление сессией</label>
           <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
             <button
@@ -700,6 +1069,7 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
             )}
           </div>
         </div>
+
       </div>
     </div>
   )

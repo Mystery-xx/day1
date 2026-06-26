@@ -145,7 +145,8 @@ public class ChatHistoryService {
                                        String model, Integer promptTokens, 
                                        Integer completionTokens, Integer totalTokens,
                                        Integer responseTimeMs, String provider,
-                                       Double temperature, Integer maxTokens) {
+                                       Double temperature, Integer maxTokens,
+                                       String toolCallsJson, String toolResultsJson) {
         ChatMessage message = new ChatMessage();
         message.setSessionId(sessionId);
         message.setRole(ChatMessage.Role.valueOf(role.toUpperCase()));
@@ -159,9 +160,21 @@ public class ChatHistoryService {
         message.setTemperature(temperature);
         message.setMaxTokens(maxTokens);
         message.setCreatedAt(Instant.now());
+        message.setToolCallsJson(toolCallsJson);
+        message.setToolResultsJson(toolResultsJson);
         
         ChatMessage saved = repository.save(message);
         return toDTO(saved);
+    }
+    
+    // Overloaded method for backward compatibility
+    public ChatMessageDTO saveMessage(String sessionId, String role, String content, 
+                                       String model, Integer promptTokens, 
+                                       Integer completionTokens, Integer totalTokens,
+                                       Integer responseTimeMs, String provider,
+                                       Double temperature, Integer maxTokens) {
+        return saveMessage(sessionId, role, content, model, promptTokens, completionTokens, 
+                          totalTokens, responseTimeMs, provider, temperature, maxTokens, null, null);
     }
     
     public void deleteSession(String sessionId) {
@@ -195,6 +208,8 @@ public class ChatHistoryService {
             newMessage.setTemperature(originalMessage.getTemperature());
             newMessage.setMaxTokens(originalMessage.getMaxTokens());
             newMessage.setCreatedAt(originalMessage.getCreatedAt());
+            newMessage.setToolCallsJson(originalMessage.getToolCallsJson());
+            newMessage.setToolResultsJson(originalMessage.getToolResultsJson());
             repository.save(newMessage);
         }
         
@@ -232,6 +247,8 @@ public class ChatHistoryService {
             newMessage.setTemperature(originalMessage.getTemperature());
             newMessage.setMaxTokens(originalMessage.getMaxTokens());
             newMessage.setCreatedAt(originalMessage.getCreatedAt());
+            newMessage.setToolCallsJson(originalMessage.getToolCallsJson());
+            newMessage.setToolResultsJson(originalMessage.getToolResultsJson());
             repository.save(newMessage);
         }
         
@@ -280,6 +297,8 @@ public class ChatHistoryService {
         dto.setMaxTokens(entity.getMaxTokens());
         dto.setCreatedAt(entity.getCreatedAt());
         dto.setSummary(entity.getSummary());
+        dto.setToolCallsJson(entity.getToolCallsJson());
+        dto.setToolResultsJson(entity.getToolResultsJson());
         return dto;
     }
     

@@ -60,7 +60,9 @@ function App() {
         id: msg.id,
         role: msg.role,
         content: msg.content,
-        createdAt: msg.createdAt
+        createdAt: msg.createdAt,
+        toolCalls: msg.toolCallsJson,
+        toolResults: msg.toolResultsJson
       }))
       setMessages(convertedMessages)
       setTimeout(() => scrollToBottom(), 100)
@@ -209,6 +211,34 @@ function App() {
               console.log('Setting debugRequest immediately:', data.data)
               setLastRequest(data.data)
               setLastResponse({ debugRequest: data.data })
+            } else if (data.type === 'toolCall') {
+              // AI is invoking a tool - display inline message
+              const toolCall = data.data
+              console.log('Tool call:', toolCall)
+              setMessages(prev => [...prev, { 
+                role: 'system', 
+                content: `🔧 Using ${toolCall.toolName || toolCall.name}...`,
+                metadata: { type: 'toolCall', toolCall }
+              }])
+            } else if (data.type === 'toolResult') {
+              // Tool execution completed - integrate result into flow
+              const toolResult = data.data
+              console.log('Tool result:', toolResult)
+              // Tool results are typically incorporated into the next AI response
+              // Store for potential display if needed
+              setLastResponse(prev => ({ 
+                ...prev, 
+                lastToolResult: toolResult 
+              }))
+            } else if (data.type === 'toolError') {
+              // Tool execution failed - display error gracefully
+              const toolError = data.data
+              console.log('Tool error:', toolError)
+              setMessages(prev => [...prev, { 
+                role: 'system', 
+                content: `⚠️ Tool error: ${toolError.toolName || toolError.name} - ${toolError.error || toolError.message || 'Unknown error'}`,
+                metadata: { type: 'toolError', toolError }
+              }])
             } else if (data.type === 'response') {
               const response = data.data
               console.log('Full response:', response)

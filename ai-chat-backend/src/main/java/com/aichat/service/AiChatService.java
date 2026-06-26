@@ -29,6 +29,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Collections;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import com.aichat.service.McpClientService;
+import com.aichat.service.McpSessionClient;
 
 @Service
 public class AiChatService {
@@ -40,13 +44,15 @@ public class AiChatService {
     private final ObjectMapper objectMapper;
     private final ChatHistoryService historyService;
     private final ContextStrategyFactory contextStrategyFactory;
+    private final McpClientService mcpClientService;
 
     public AiChatService(AiChatProperties properties, ChatHistoryService historyService,
-                         ContextStrategyFactory contextStrategyFactory) {
+                         ContextStrategyFactory contextStrategyFactory, McpClientService mcpClientService) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         this.historyService = historyService;
         this.contextStrategyFactory = contextStrategyFactory;
+        this.mcpClientService = mcpClientService;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(120));
@@ -63,7 +69,8 @@ public class AiChatService {
 
         Map<String, Object> requestBody = buildRequestBody(request);
         
-        String provider = request.getSettings() != null ? request.getSettings().getProvider() : properties.getProvider();
+        ChatRequest.ModelSettings requestSettings = request.getSettings();
+        String provider = requestSettings != null ? requestSettings.getProvider() : properties.getProvider();
         String baseUrl = getBaseUrlForProvider(provider);
         String apiKey = getApiKeyForProvider(provider);
         
@@ -82,46 +89,118 @@ public class AiChatService {
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(Map.class)
-                .map(response -> {
-                    logger.debug("Received response from AI: {}", response);
-                    try {
-                        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-                        if (choices != null && !choices.isEmpty()) {
-                            Map<String, String> message = (Map<String, String>) choices.get(0).get("message");
-                            if (message != null) {
-                                String content = message.get("content");
-                                String model = (String) response.get("model");
-                                Map<String, Object> usage = (Map<String, Object>) response.get("usage");
-                                ChatResponse chatResponse = new ChatResponse(content, null, model, usage);
-                                chatResponse.setDebugRequest(requestBody);
-                                chatResponse.setDebugResponse(response);
-                                return chatResponse;
-                            }
-                        }
-                        ChatResponse errorResponse = ChatResponse.error("Empty response from AI");
-                        errorResponse.setDebugRequest(requestBody);
-                        errorResponse.setDebugResponse(response);
-                        return errorResponse;
-                    } catch (Exception e) {
-                        logger.error("Error parsing AI response", e);
-                        ChatResponse errorResponse = ChatResponse.error("Error parsing response: " + e.getMessage());
-                        errorResponse.setDebugRequest(requestBody);
-                        errorResponse.setDebugResponse(response);
-                        return errorResponse;
-                    }
-                })
-                .onErrorResume(e -> {
-                    if (e instanceof WebClientResponseException) {
-                        WebClientResponseException wcre = (WebClientResponseException) e;
-                        logger.error("HTTP {} - Response body: {}", wcre.getStatusCode(), wcre.getResponseBodyAsString());
-                    } else {
-                        logger.error("Error calling AI API", e);
-                    }
-                    ChatResponse errorResponse = ChatResponse.error("Error calling AI: " + e.getMessage());
-                    errorResponse.setDebugRequest(requestBody);
-                    errorResponse.setDebugResponse(Map.of("error", e.getMessage()));
-                    return Mono.just(errorResponse);
-                });
+                .flatMap(response -> handleAiResponse(response, requestBody, requestWebClient, apiKey, baseUrl, 0));
+    }
+
+    private Mono<ChatResponse> handleAiResponse(Map<String, Object> response, 
+                                                 Map<String, Object> originalRequestBody,
+                                                 WebClient webClient, String apiKey, String baseUrl,
+                                                 int recursionDepth) {
+        if (recursionDepth > 5) {
+            return Mono.just(ChatResponse.error("Too many tool call iterations"));
+        }
+
+        try {
+            List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
+            if (choices == null || choices.isEmpty()) {
+                return Mono.just(ChatResponse.error("Empty response from AI"));
+            }
+
+            Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+            if (message == null) {
+                return Mono.just(ChatResponse.error("Empty message from AI"));
+            }
+
+            String content = (String) message.get("content");
+            String model = (String) response.get("model");
+            Map<String, Object> usage = (Map<String, Object>) response.get("usage");
+            
+            // Check for native tool_calls
+            List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) message.get("tool_calls");
+            
+            if (toolCalls != null && !toolCalls.isEmpty()) {
+                logger.info("Processing {} tool calls", toolCalls.size());
+                return executeToolCalls(toolCalls, originalRequestBody, webClient, apiKey, baseUrl, model, usage, recursionDepth);
+            }
+            
+            // No tool calls - return response
+            ChatResponse chatResponse = new ChatResponse(content, null, model, usage);
+            chatResponse.setDebugRequest(originalRequestBody);
+            chatResponse.setDebugResponse(response);
+            return Mono.just(chatResponse);
+            
+        } catch (Exception e) {
+            logger.error("Error parsing AI response", e);
+            ChatResponse errorResponse = ChatResponse.error("Error parsing response: " + e.getMessage());
+            errorResponse.setDebugRequest(originalRequestBody);
+            errorResponse.setDebugResponse(response);
+            return Mono.just(errorResponse);
+        }
+    }
+
+    private Mono<ChatResponse> executeToolCalls(List<Map<String, Object>> toolCalls,
+                                                 Map<String, Object> originalRequestBody,
+                                                 WebClient webClient, String apiKey, String baseUrl,
+                                                 String model, Map<String, Object> usage,
+                                                 int recursionDepth) {
+        List<Map<String, Object>> toolResults = new ArrayList<>();
+        
+        // Execute each tool call
+        for (Map<String, Object> toolCall : toolCalls) {
+            try {
+                String toolCallId = (String) toolCall.get("id");
+                Map<String, Object> function = (Map<String, Object>) toolCall.get("function");
+                String toolName = (String) function.get("name");
+                String argumentsStr = (String) function.get("arguments");
+                
+                logger.info("Executing tool: {} with args: {}", toolName, argumentsStr);
+                
+                // Parse arguments
+                Map<String, Object> arguments = objectMapper.readValue(argumentsStr, Map.class);
+                
+                // Execute tool via MCP
+                McpClientService.ToolCallResult result = mcpClientService.callTool(toolName, arguments);
+                
+                // Build tool result message
+                Map<String, Object> toolResult = new HashMap<>();
+                toolResult.put("role", "tool");
+                toolResult.put("tool_call_id", toolCallId);
+                toolResult.put("name", toolName);
+                toolResult.put("content", result.getContent());
+                toolResults.add(toolResult);
+                
+                logger.info("Tool {} executed successfully", toolName);
+                
+            } catch (Exception e) {
+                logger.error("Error executing tool call", e);
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("role", "tool");
+                errorResult.put("content", "Error: " + e.getMessage());
+                toolResults.add(errorResult);
+            }
+        }
+        
+        // Build new request with tool results
+        List<Map<String, Object>> messages = (List<Map<String, Object>>) originalRequestBody.get("messages");
+        List<Map<String, Object>> newMessages = new ArrayList<>(messages);
+        
+        // Add tool results to messages
+        newMessages.addAll(toolResults);
+        
+        Map<String, Object> newRequestBody = new HashMap<>(originalRequestBody);
+        newRequestBody.put("messages", newMessages);
+        
+        logger.info("Sending {} tool results back to AI", toolResults.size());
+        
+        // Send back to AI for final response
+        return webClient.post()
+                .uri("/chat/completions")
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                .bodyValue(newRequestBody)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1));
     }
 
     public Map<String, Object> buildDebugRequest(ChatRequest request) {
@@ -295,6 +374,14 @@ public class AiChatService {
         
         requestBody.put("messages", messages);
         requestBody.put("stream", false);
+        
+        // Add MCP tool definitions for AI function calling
+        List<Map<String, Object>> mcpTools = mcpClientService.getToolDefinitionsForAI();
+        if (!mcpTools.isEmpty()) {
+            requestBody.put("tools", mcpTools);
+            requestBody.put("tool_choice", "auto");
+            logger.debug("Added {} MCP tool definitions to request", mcpTools.size());
+        }
         
         // Use request settings if provided, otherwise fall back to properties
         
@@ -542,4 +629,49 @@ public class AiChatService {
         }
     }
 
+
+    private List<Map<String, Object>> parseXmlToolCalls(String content) {
+        List<Map<String, Object>> toolCalls = new ArrayList<>();
+        if (content == null || content.isEmpty()) {
+            return toolCalls;
+        }
+        
+        Pattern pattern = Pattern.compile("<function=([^>\\s]+)([^>]*?)>(.*?)</function=\\1>|<function=([^>\\s]+)([^>]*?)/>", Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(content);
+        
+        while (matcher.find()) {
+            try {
+                Map<String, Object> toolCall = new HashMap<>();
+                String functionName = matcher.group(1) != null ? matcher.group(1) : matcher.group(4);
+                String body = matcher.group(3);
+                
+                toolCall.put("id", "xml-" + System.currentTimeMillis() + "-" + functionName);
+                toolCall.put("type", "function");
+                
+                Map<String, Object> function = new HashMap<>();
+                function.put("name", functionName);
+                
+                Map<String, Object> arguments = new HashMap<>();
+                if (body != null && !body.trim().isEmpty()) {
+                    Pattern paramPattern = Pattern.compile("</parameter=([^>]+)>(.*?)</parameter=\\1>", Pattern.DOTALL);
+                    Matcher paramMatcher = paramPattern.matcher(body);
+                    while (paramMatcher.find()) {
+                        String paramName = paramMatcher.group(1);
+                        String paramValue = paramMatcher.group(2).trim();
+                        arguments.put(paramName, paramValue);
+                    }
+                }
+                
+                ObjectMapper mapper = new ObjectMapper();
+                function.put("arguments", mapper.writeValueAsString(arguments));
+                toolCall.put("function", function);
+                toolCalls.add(toolCall);
+                
+            } catch (Exception e) {
+                logger.warn("Failed to parse XML tool call", e);
+            }
+        }
+        
+        return toolCalls;
+    }
 }

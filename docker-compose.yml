@@ -14,7 +14,6 @@ services:
       - HUGGINGFACE_API_URL=${HUGGINGFACE_API_URL:-}
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
     ports:
-      - "8080:8080"
       - "8082:8082"
     networks:
       - ai-chat-network

@@ -54,6 +54,12 @@ public class ChatMessage {
     @Column(name = "summary", columnDefinition = "TEXT")
     private String summary;
     
+    @Column(name = "tool_calls", columnDefinition = "JSON")
+    private String toolCallsJson;
+    
+    @Column(name = "tool_results", columnDefinition = "JSON")
+    private String toolResultsJson;
+    
     public enum Role {
         USER, ASSISTANT, SYSTEM
     }
@@ -173,5 +179,21 @@ public class ChatMessage {
     
     public void setSummary(String summary) {
         this.summary = summary;
+    }
+
+    public String getToolCallsJson() {
+        return toolCallsJson;
+    }
+
+    public void setToolCallsJson(String toolCallsJson) {
+        this.toolCallsJson = toolCallsJson;
+    }
+
+    public String getToolResultsJson() {
+        return toolResultsJson;
+    }
+
+    public void setToolResultsJson(String toolResultsJson) {
+        this.toolResultsJson = toolResultsJson;
     }
 }

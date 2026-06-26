@@ -102,6 +102,40 @@ public class ChatController {
                             try {
                                 logger.debug("Emitting response: {}", response);
                                 
+                                // Emit tool call events if present
+                                if (response.getToolCalls() != null && !response.getToolCalls().isEmpty()) {
+                                    for (Map<String, Object> toolCall : response.getToolCalls()) {
+                                        try {
+                                            Map<String, Object> toolCallEvent = new HashMap<>();
+                                            toolCallEvent.put("type", "toolCall");
+                                            toolCallEvent.put("data", toolCall);
+                                            toolCallEvent.put("sessionId", finalSessionId);
+                                            String toolCallJson = mapper.writeValueAsString(toolCallEvent);
+                                            emitter.next(toolCallJson);
+                                            logger.debug("Emitted toolCall event: {}", toolCall.get("function"));
+                                        } catch (JsonProcessingException e) {
+                                            logger.warn("Failed to serialize toolCall event", e);
+                                        }
+                                    }
+                                }
+                                
+                                // Emit tool result events if present
+                                if (response.getToolResults() != null && !response.getToolResults().isEmpty()) {
+                                    for (Map<String, Object> toolResult : response.getToolResults()) {
+                                        try {
+                                            Map<String, Object> toolResultEvent = new HashMap<>();
+                                            toolResultEvent.put("type", "toolResult");
+                                            toolResultEvent.put("data", toolResult);
+                                            toolResultEvent.put("sessionId", finalSessionId);
+                                            String toolResultJson = mapper.writeValueAsString(toolResultEvent);
+                                            emitter.next(toolResultJson);
+                                            logger.debug("Emitted toolResult event: {}", toolResult.get("name"));
+                                        } catch (JsonProcessingException e) {
+                                            logger.warn("Failed to serialize toolResult event", e);
+                                        }
+                                    }
+                                }
+                                
                                 // Save user message to DB
                                 historyService.saveMessage(
                                     sessionIdForSave,
@@ -124,6 +158,20 @@ public class ChatController {
                                     Integer totalTokens = response.getUsage() != null ? 
                                         (Integer) response.getUsage().get("total_tokens") : null;
                                     
+                                    // Serialize tool calls and results to JSON
+                                    String toolCallsJson = null;
+                                    String toolResultsJson = null;
+                                    try {
+                                        if (response.getToolCalls() != null && !response.getToolCalls().isEmpty()) {
+                                            toolCallsJson = mapper.writeValueAsString(response.getToolCalls());
+                                        }
+                                        if (response.getToolResults() != null && !response.getToolResults().isEmpty()) {
+                                            toolResultsJson = mapper.writeValueAsString(response.getToolResults());
+                                        }
+                                    } catch (JsonProcessingException e) {
+                                        logger.warn("Failed to serialize tool call metadata", e);
+                                    }
+                                    
                                     historyService.saveMessage(
                                         sessionIdForSave,
                                         "assistant",
@@ -135,7 +183,9 @@ public class ChatController {
                                         responseTime,
                                         request.getSettings() != null ? request.getSettings().getProvider() : null,
                                         request.getSettings() != null ? request.getSettings().getTemperature() : null,
-                                        request.getSettings() != null ? request.getSettings().getMaxTokens() : null
+                                        request.getSettings() != null ? request.getSettings().getMaxTokens() : null,
+                                        toolCallsJson,
+                                        toolResultsJson
                                     );
                                     
                                     // Calculate session totals
