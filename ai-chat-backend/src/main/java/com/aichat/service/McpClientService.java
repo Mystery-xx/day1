@@ -144,12 +144,19 @@ public class McpClientService {
             return new ToolCallResult(false, "Not connected to server " + serverId, null);
         }
         
+        logger.info(">>> MCP TOOL CALL [{}] on server {} (id={})", toolName, serverConfig.getName(), serverId);
+        logger.debug("Tool arguments: {}", arguments);
+        
         McpSessionClient.ToolCallResult result = sessionClient.callTool(
             serverId.toString(),
             serverConfig.getUrl(),
             toolName,
             arguments
         );
+        
+        logger.info("<<< MCP TOOL RESULT [{}] - success={}, contentLength={}", 
+            toolName, result.isSuccess(), result.getContent() != null ? result.getContent().length() : 0);
+        logger.debug("Tool result content: {}", result.getContent());
         
         return new ToolCallResult(result.isSuccess(), result.getContent(), null);
     }

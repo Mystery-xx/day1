@@ -53,7 +53,8 @@ public class McpSessionClient {
     }
 
     public SessionInfo initialize(String serverId, String baseUrl) {
-        logger.info("Initializing MCP session for server {} at {}", serverId, baseUrl);
+        logger.info(">>> MCP REQUEST [initialize] to server {} at {}", serverId, baseUrl);
+        logger.debug("Initialize request: protocolVersion=2024-11-05, capabilities={{}}, clientInfo={name=test, version=1.0}");
         
         try {
             String normalizedUrl = ensureTrailingSlash(baseUrl);
@@ -65,6 +66,7 @@ public class McpSessionClient {
                     .build();
             
             client.initialize();
+            logger.info("<<< MCP RESPONSE [initialize] from server {} - SUCCESS", serverId);
             logger.info("MCP client initialized successfully");
             
             clients.put(serverId, client);
@@ -73,7 +75,8 @@ public class McpSessionClient {
             return new SessionInfo(true, serverId, "Connected");
             
         } catch (Exception e) {
-            logger.error("Failed to initialize MCP session: {}", e.getMessage());
+            logger.error("<<< MCP RESPONSE [initialize] from server {} - ERROR: {}", serverId, e.getMessage());
+            logger.error("Failed to initialize MCP session: {}", e.getMessage(), e);
             return new SessionInfo(false, null, "Error: " + e.getMessage());
         }
     }
@@ -224,8 +227,14 @@ public class McpSessionClient {
         }
         
         try {
+            logger.info(">>> MCP REQUEST [listTools] to server {} at {}", serverId, baseUrl);
+            logger.debug("Request method: tools/list");
+            logger.debug("Request params: {{}}");
+            
             McpSchema.ListToolsResult result = client.listTools();
             List<McpSchema.Tool> tools = result.tools();
+            
+            logger.info("<<< MCP RESPONSE [listTools] from server {} - {} tools", serverId, tools.size());
             
             List<ToolInfo> toolInfos = new ArrayList<>();
             for (McpSchema.Tool tool : tools) {
@@ -234,7 +243,10 @@ public class McpSessionClient {
                 toolInfo.setDescription(tool.description() != null ? tool.description() : "");
                 
                 try {
-                    toolInfo.setParameters(objectMapper.writeValueAsString(tool.inputSchema()));
+                    String schemaJson = objectMapper.writeValueAsString(tool.inputSchema());
+                    toolInfo.setParameters(schemaJson);
+                    logger.debug("  Tool [{}]: description={}, schema={}", 
+                        tool.name(), tool.description(), schemaJson);
                 } catch (Exception e) {
                     logger.warn("Failed to serialize schema for {}: {}", tool.name(), e.getMessage());
                     toolInfo.setParameters("{}");
@@ -247,7 +259,7 @@ public class McpSessionClient {
             return toolInfos;
             
         } catch (Exception e) {
-            logger.error("Failed to list tools: {}", e.getMessage());
+            logger.error("Failed to list tools: {}", e.getMessage(), e);
             return List.of();
         }
     }
@@ -260,6 +272,12 @@ public class McpSessionClient {
         }
         
         try {
+            String argsJson = objectMapper.writeValueAsString(arguments);
+            logger.info(">>> MCP REQUEST [callTool] to server {} at {}", serverId, baseUrl);
+            logger.debug("Request method: tools/call");
+            logger.debug("Request tool name: {}", toolName);
+            logger.debug("Request arguments: {}", argsJson);
+            
             McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(toolName, arguments);
             // Execute in separate thread to avoid blocking reactor thread
             Future<McpSchema.CallToolResult> future = executor.submit(() -> client.callTool(request));
@@ -268,6 +286,13 @@ public class McpSessionClient {
             String content = extractContentFromResult(result);
             boolean isError = result.isError();
             
+            logger.info("<<< MCP RESPONSE [callTool] from server {} - tool={}, success={}, contentLength={}", 
+                serverId, toolName, !isError, content.length());
+            logger.debug("Response content: {}", content);
+            if (isError) {
+                logger.warn("Tool returned error: {}", content);
+            }
+            
             if (isError) {
                 return new ToolCallResult(false, content, null);
             }
@@ -275,10 +300,10 @@ public class McpSessionClient {
             return new ToolCallResult(true, content, null);
             
         } catch (TimeoutException e) {
-            logger.error("Tool call timeout: {}", toolName);
+            logger.error("Tool call timeout: {}", toolName, e);
             return new ToolCallResult(false, "Error: Tool call timeout", null);
         } catch (Exception e) {
-            logger.error("Tool call failed: {}", e.getMessage());
+            logger.error("Tool call failed: {}", toolName, e.getMessage(), e);
             return new ToolCallResult(false, "Error: " + e.getMessage(), null);
         }
     }

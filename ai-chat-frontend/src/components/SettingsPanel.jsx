@@ -8,7 +8,7 @@ const STRATEGY_OPTIONS = [
 ]
 
 function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory, sessions, onSessionSelect, onDeleteSession, sessionsLoading, onFactsRefreshed }) {
-  const { servers, connectedServer, tools, status, error, fetchServers, addServer, connect, disconnect } = useMcp()
+  const { servers, connectedServer, tools, status, error, fetchServers, addServer, connect, disconnect, deleteServer } = useMcp()
   
   const handleChange = (key, value) => {
     onSettingsChange({
@@ -219,6 +219,23 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
       setTestResult(null)
     } catch (err) {
       console.error('Error disconnecting:', err)
+    }
+  }
+  
+  const handleDelete = async (serverId, serverName) => {
+    if (!window.confirm(`Удалить MCP сервер "${serverName}"?\n\nЭто действие нельзя отменить.`)) {
+      return
+    }
+    
+    try {
+      await deleteServer(serverId)
+      if (connectedServer?.id === serverId) {
+        setSelectedServerId(null)
+        setTestResult(null)
+      }
+    } catch (err) {
+      console.error('Error deleting server:', err)
+      alert('Ошибка при удалении сервера: ' + (err.message || 'Неизвестная ошибка'))
     }
   }
   
@@ -682,6 +699,22 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
                             {status === 'connecting' ? '...' : 'Connect'}
                           </button>
                         )}
+                        <button
+                          onClick={() => handleDelete(server.id, server.name)}
+                          disabled={status === 'deleting'}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            cursor: status === 'deleting' ? 'not-allowed' : 'pointer',
+                            borderRadius: '4px',
+                            border: '1px solid #f44336',
+                            background: status === 'deleting' ? '#ccc' : '#f44336',
+                            color: 'white'
+                          }}
+                          title="Delete MCP server"
+                        >
+                          {status === 'deleting' ? '...' : '🗑 Delete'}
+                        </button>
                       </div>
                     </div>
                     

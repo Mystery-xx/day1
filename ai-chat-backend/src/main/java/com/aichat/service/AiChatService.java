@@ -96,7 +96,7 @@ public class AiChatService {
                                                  Map<String, Object> originalRequestBody,
                                                  WebClient webClient, String apiKey, String baseUrl,
                                                  int recursionDepth) {
-        if (recursionDepth > 5) {
+        if (recursionDepth > 10) {
             return Mono.just(ChatResponse.error("Too many tool call iterations"));
         }
 
