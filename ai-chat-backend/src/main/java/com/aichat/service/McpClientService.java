@@ -23,6 +23,7 @@ public class McpClientService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final ConcurrentHashMap<Long, ConnectionStatus> connectionStates = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, List<McpSessionClient.ToolInfo>> toolCache = new ConcurrentHashMap<>();
 
     public McpClientService(McpServerRepository serverRepository, McpSessionClient sessionClient) {
         this.serverRepository = serverRepository;
@@ -68,6 +69,9 @@ public class McpClientService {
                 serverConfig.getUrl()
             );
             
+            // Cache tools for fast lookup
+            toolCache.put(serverConfig.getId(), tools);
+            
             logger.info("Successfully connected to MCP server '{}' with {} tools", 
                     serverConfig.getName(), tools.size());
             
@@ -101,6 +105,7 @@ public class McpClientService {
         try {
             sessionClient.closeSession(serverId.toString());
             connectionStates.put(serverId, ConnectionStatus.DISCONNECTED);
+            toolCache.remove(serverId);  // Clear tool cache
             
             logger.info("Successfully disconnected from MCP server {}", serverId);
             return true;
@@ -162,12 +167,29 @@ public class McpClientService {
     }
 
     public ToolCallResult callTool(String toolName, Map<String, Object> arguments) {
-        Long serverId = getFirstConnectedServerId();
-        if (serverId == null) {
-            return new ToolCallResult(false, "No MCP server connected", null);
+        // Search for tool in cached tool lists (fast, no HTTP calls)
+        for (Map.Entry<Long, ConnectionStatus> entry : connectionStates.entrySet()) {
+            if (entry.getValue() == ConnectionStatus.CONNECTED) {
+                Long serverId = entry.getKey();
+                McpServerConfig config = serverRepository.findById(serverId).orElse(null);
+                if (config == null) {
+                    continue;
+                }
+                
+                // Check cache for this tool
+                List<McpSessionClient.ToolInfo> cachedTools = toolCache.get(serverId);
+                if (cachedTools != null) {
+                    boolean hasTool = cachedTools.stream().anyMatch(t -> t.getName().equals(toolName));
+                    if (hasTool) {
+                        logger.info("Found tool [{}] in cache on server [{}] (id={})", toolName, config.getName(), serverId);
+                        return callTool(serverId, toolName, arguments);
+                    }
+                }
+            }
         }
         
-        return callTool(serverId, toolName, arguments);
+        logger.warn("Tool [{}] not found on any connected MCP server", toolName);
+        return new ToolCallResult(false, "Tool '" + toolName + "' not found on any connected server", null);
     }
 
     public boolean isConnected(Long serverId) {
@@ -189,46 +211,58 @@ public class McpClientService {
     }
 
     public List<Map<String, Object>> getToolDefinitionsForAI() {
-        Long serverId = getFirstConnectedServerId();
-        if (serverId == null) {
-            return List.of();
-        }
+        List<Map<String, Object>> allTools = new ArrayList<>();
+        int serverCount = 0;
         
-        McpServerConfig config = serverRepository.findById(serverId).orElse(null);
-        if (config == null) {
-            return List.of();
-        }
-        
-        List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
-            serverId.toString(),
-            config.getUrl()
-        );
-        
-        List<Map<String, Object>> aiTools = new ArrayList<>();
-        for (McpSessionClient.ToolInfo tool : tools) {
-            Map<String, Object> aiTool = new HashMap<>();
-            aiTool.put("type", "function");
-            
-            Map<String, Object> function = new HashMap<>();
-            function.put("name", tool.getName());
-            function.put("description", tool.getDescription());
-            
-            try {
-                Map<String, Object> schema = objectMapper.readValue(tool.getParameters(), Map.class);
-                function.put("parameters", schema);
-            } catch (Exception e) {
-                logger.warn("Failed to parse schema for tool {}: {}", tool.getName(), e.getMessage());
-                Map<String, Object> emptySchema = new HashMap<>();
-                emptySchema.put("type", "object");
-                emptySchema.put("properties", new HashMap<>());
-                function.put("parameters", emptySchema);
+        // Collect tools from ALL connected servers
+        for (Map.Entry<Long, ConnectionStatus> entry : connectionStates.entrySet()) {
+            if (entry.getValue() == ConnectionStatus.CONNECTED) {
+                serverCount++;
+                Long serverId = entry.getKey();
+                McpServerConfig config = serverRepository.findById(serverId).orElse(null);
+                if (config == null) {
+                    continue;
+                }
+                
+                List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
+                    serverId.toString(),
+                    config.getUrl()
+                );
+                
+                logger.info("Collecting {} tools from server [{}] (id={})", 
+                    tools.size(), config.getName(), serverId);
+                
+                for (McpSessionClient.ToolInfo tool : tools) {
+                    Map<String, Object> aiTool = new HashMap<>();
+                    aiTool.put("type", "function");
+                    
+                    Map<String, Object> function = new HashMap<>();
+                    function.put("name", tool.getName());
+                    function.put("description", tool.getDescription());
+                    
+                    try {
+                        Map<String, Object> schema = objectMapper.readValue(tool.getParameters(), Map.class);
+                        function.put("parameters", schema);
+                        logger.debug("Added tool [{}] from server [{}] (id={})", 
+                            tool.getName(), config.getName(), serverId);
+                    } catch (Exception e) {
+                        logger.warn("Failed to parse schema for tool {}: {}", tool.getName(), e.getMessage());
+                        Map<String, Object> emptySchema = new HashMap<>();
+                        emptySchema.put("type", "object");
+                        emptySchema.put("properties", new HashMap<>());
+                        function.put("parameters", emptySchema);
+                    }
+                    
+                    aiTool.put("function", function);
+                    allTools.add(aiTool);
+                }
             }
-            
-            aiTool.put("function", function);
-            aiTools.add(aiTool);
         }
         
-        return aiTools;
+        logger.info("Collected {} tools from {} connected MCP servers", 
+            allTools.size(), serverCount);
+        
+        return allTools;
     }
 
     public String formatErrorMessageForController(Exception e) {

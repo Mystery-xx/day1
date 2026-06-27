@@ -118,12 +118,27 @@ public class AiChatService {
             // Check for native tool_calls
             List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) message.get("tool_calls");
             
+            logger.info("AI response at depth {}: contentLength={}, hasToolCalls={}", 
+                recursionDepth, content != null ? content.length() : 0, toolCalls != null && !toolCalls.isEmpty());
+            
             if (toolCalls != null && !toolCalls.isEmpty()) {
-                logger.info("Processing {} tool calls", toolCalls.size());
+                // HARD LIMIT: Only allow ONE round of tool calls to prevent infinite loops
+                // gpustack API doesn't support proper continuation after tool results
+                if (recursionDepth >= 1) {
+                    logger.warn("Tool call recursion limit reached (depth={}) - returning partial answer", recursionDepth);
+                    String partialAnswer = "Инструмент вызван, но модель не вернула финальный ответ. Это ограничение gpustack API.";
+                    ChatResponse chatResponse = new ChatResponse(partialAnswer, null, model, usage);
+                    chatResponse.setDebugRequest(originalRequestBody);
+                    chatResponse.setDebugResponse(response);
+                    return Mono.just(chatResponse);
+                }
+                
+                logger.info("Processing {} tool calls at depth {}", toolCalls.size(), recursionDepth);
                 return executeToolCalls(toolCalls, originalRequestBody, webClient, apiKey, baseUrl, model, usage, recursionDepth);
             }
             
             // No tool calls - return response
+            logger.info("No tool calls at depth {} - returning final answer", recursionDepth);
             ChatResponse chatResponse = new ChatResponse(content, null, model, usage);
             chatResponse.setDebugRequest(originalRequestBody);
             chatResponse.setDebugResponse(response);
@@ -189,6 +204,20 @@ public class AiChatService {
         
         Map<String, Object> newRequestBody = new HashMap<>(originalRequestBody);
         newRequestBody.put("messages", newMessages);
+        
+        // Add system message to instruct AI to provide final answer after tool results
+        // This prevents infinite tool calling loops
+        List<Map<String, Object>> existingMessages = (List<Map<String, Object>>) originalRequestBody.get("messages");
+        boolean hasSystemMessage = existingMessages.stream()
+                .anyMatch(m -> "system".equals(m.get("role")));
+        
+        if (!hasSystemMessage) {
+            // Add system message at the beginning
+            Map<String, Object> systemMsg = new HashMap<>();
+            systemMsg.put("role", "system");
+            systemMsg.put("content", "You are a helpful assistant. After receiving tool results, you MUST provide a final answer to the user. Do NOT call tools again. Summarize the tool results and respond naturally to the user's original question.");
+            newMessages.add(0, systemMsg);
+        }
         
         logger.info("Sending {} tool results back to AI", toolResults.size());
         

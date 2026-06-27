@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 
 export function useMcp() {
   const [servers, setServers] = useState([]);
-  const [connectedServer, setConnectedServer] = useState(null);
+  const [connectedServers, setConnectedServers] = useState(new Set());
   const [tools, setTools] = useState([]);
   const [status, setStatus] = useState('disconnected');
   const [error, setError] = useState(null);
@@ -26,6 +26,29 @@ export function useMcp() {
       console.error('Error fetching MCP servers:', err);
     }
   }, []);
+
+  // Fetch tools from all connected servers
+  const fetchAllTools = useCallback(async () => {
+    try {
+      const allTools = [];
+      
+      for (const serverId of connectedServers) {
+        try {
+          const response = await fetch(`/api/mcp/servers/${serverId}/tools`);
+          if (response.ok) {
+            const toolsData = await response.json();
+            allTools.push(...(toolsData.tools || []));
+          }
+        } catch (err) {
+          console.warn(`Failed to fetch tools from server ${serverId}:`, err);
+        }
+      }
+      
+      setTools(allTools);
+    } catch (err) {
+      console.error('Error fetching all tools:', err);
+    }
+  }, [connectedServers]);
 
   // Add new MCP server
   const addServer = useCallback(async (serverData) => {
@@ -85,10 +108,11 @@ export function useMcp() {
 
       if (response.ok) {
         setServers(prev => prev.filter(s => s.id !== serverId));
-        if (connectedServer && connectedServer.id === serverId) {
-          setConnectedServer(null);
-          setStatus('disconnected');
-        }
+        setConnectedServers(prev => {
+          const next = new Set(prev);
+          next.delete(serverId);
+          return next;
+        });
       } else {
         throw new Error(`Failed to delete server: ${response.status}`);
       }
@@ -97,13 +121,12 @@ export function useMcp() {
       console.error('Error deleting MCP server:', err);
       throw err;
     }
-  }, [connectedServer]);
+  }, [connectedServers, fetchAllTools]);
 
   // Connect to MCP server
   const connect = useCallback(async (serverId) => {
     try {
       setError(null);
-      setStatus('connecting');
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -118,15 +141,11 @@ export function useMcp() {
 
       if (response.ok) {
         const result = await response.json();
-        setConnectedServer(result.server || { id: serverId });
+        setConnectedServers(prev => new Set([...prev, serverId]));
         setStatus('connected');
         
-        // Fetch tools after successful connection
-        const toolsResponse = await fetch(`/api/mcp/servers/${serverId}/tools`);
-        if (toolsResponse.ok) {
-          const toolsData = await toolsResponse.json();
-          setTools(toolsData.tools || []);
-        }
+        // Fetch tools from all connected servers
+        await fetchAllTools();
         
         return result;
       } else {
@@ -150,7 +169,6 @@ export function useMcp() {
   const disconnect = useCallback(async (serverId) => {
     try {
       setError(null);
-      setStatus('disconnecting');
       
       const response = await fetch(`/api/mcp/servers/${serverId}/disconnect`, {
         method: 'POST',
@@ -158,15 +176,18 @@ export function useMcp() {
       });
 
       if (response.ok) {
-        setConnectedServer(null);
-        setStatus('disconnected');
-        setTools([]);
+        setConnectedServers(prev => {
+          const next = new Set(prev);
+          next.delete(serverId);
+          return next;
+        });
+        // Refresh tools from remaining connected servers
+        await fetchAllTools();
       } else {
         throw new Error(`Failed to disconnect: ${response.status}`);
       }
     } catch (err) {
       setError(err.message);
-      setStatus('error');
       console.error('Error disconnecting from MCP server:', err);
       throw err;
     }
