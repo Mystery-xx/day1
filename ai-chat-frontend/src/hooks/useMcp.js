@@ -304,7 +304,7 @@ export function useMcp() {
 
   return {
     servers,
-    connectedServer,
+    connectedServers,
     tools,
     status,
     error,

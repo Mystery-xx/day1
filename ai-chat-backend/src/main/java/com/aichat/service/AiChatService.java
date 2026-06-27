@@ -75,6 +75,9 @@ public class AiChatService {
         String apiKey = getApiKeyForProvider(provider);
         
         logger.info("Sending message to AI - Provider: {}, Base URL: {}, API Key: {}", provider, baseUrl, maskApiKey(apiKey));
+        
+        // Log the request body for debugging
+        logAiRequest(requestBody, 0);
 
         WebClient requestWebClient = WebClient.builder()
                 .baseUrl(baseUrl)
@@ -89,6 +92,7 @@ public class AiChatService {
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(Map.class)
+                .doOnSubscribe(subscription -> logger.info(">>> AI REQUEST (subscription): Sending to API"))
                 .flatMap(response -> handleAiResponse(response, requestBody, requestWebClient, apiKey, baseUrl, 0));
     }
 
@@ -118,15 +122,23 @@ public class AiChatService {
             // Check for native tool_calls
             List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) message.get("tool_calls");
             
-            logger.info("AI response at depth {}: contentLength={}, hasToolCalls={}", 
+            logger.info(">>> AI RESPONSE at depth {}: contentLength={}, hasToolCalls={}", 
                 recursionDepth, content != null ? content.length() : 0, toolCalls != null && !toolCalls.isEmpty());
             
+            if (content != null && !content.isEmpty()) {
+                logger.debug("AI content preview: {}", content.substring(0, Math.min(200, content.length())));
+            }
+            
             if (toolCalls != null && !toolCalls.isEmpty()) {
-                // HARD LIMIT: Only allow ONE round of tool calls to prevent infinite loops
-                // gpustack API doesn't support proper continuation after tool results
-                if (recursionDepth >= 1) {
+                logger.debug("Tool calls: {}", toolCalls);
+            }
+            
+            if (toolCalls != null && !toolCalls.isEmpty()) {
+                // HARD LIMIT: Allow up to 15 rounds of tool calls to prevent infinite loops
+                // This handles complex multi-step tool scenarios
+                if (recursionDepth >= 15) {
                     logger.warn("Tool call recursion limit reached (depth={}) - returning partial answer", recursionDepth);
-                    String partialAnswer = "Инструмент вызван, но модель не вернула финальный ответ. Это ограничение gpustack API.";
+                    String partialAnswer = "Достигнут лимит количества вызовов инструментов (" + recursionDepth + " итераций).";
                     ChatResponse chatResponse = new ChatResponse(partialAnswer, null, model, usage);
                     chatResponse.setDebugRequest(originalRequestBody);
                     chatResponse.setDebugResponse(response);
@@ -138,7 +150,10 @@ public class AiChatService {
             }
             
             // No tool calls - return response
-            logger.info("No tool calls at depth {} - returning final answer", recursionDepth);
+            logger.info("<<< FINAL AI ANSWER at depth {}: contentLength={}", recursionDepth, content != null ? content.length() : 0);
+            if (content != null && !content.isEmpty()) {
+                logger.info("AI answer: {}", content);
+            }
             ChatResponse chatResponse = new ChatResponse(content, null, model, usage);
             chatResponse.setDebugRequest(originalRequestBody);
             chatResponse.setDebugResponse(response);
@@ -184,7 +199,9 @@ public class AiChatService {
                 toolResult.put("content", result.getContent());
                 toolResults.add(toolResult);
                 
-                logger.info("Tool {} executed successfully", toolName);
+                logger.info("<<< TOOL RESULT [{}]: success={}, contentLength={}", 
+                    toolName, result.isSuccess(), result.getContent() != null ? result.getContent().length() : 0);
+                logger.debug("Tool result content: {}", result.getContent());
                 
             } catch (Exception e) {
                 logger.error("Error executing tool call", e);
@@ -215,13 +232,18 @@ public class AiChatService {
             // Add system message at the beginning
             Map<String, Object> systemMsg = new HashMap<>();
             systemMsg.put("role", "system");
-            systemMsg.put("content", "You are a helpful assistant. After receiving tool results, you MUST provide a final answer to the user. Do NOT call tools again. Summarize the tool results and respond naturally to the user's original question.");
+            systemMsg.put("content", "You are a helpful assistant with access to tools. CRITICAL RULES: 1) When you receive tool results, you MUST use the actual data from the results to answer the user's question. 2) NEVER just count the results or say 'found N items'. 3) ALWAYS extract and present the actual content from tool results. 4) After receiving tool results, provide a final natural language answer - do NOT call tools again. 5) Tool results contain real data - use it to give a complete answer.");
             newMessages.add(0, systemMsg);
         }
         
-        logger.info("Sending {} tool results back to AI", toolResults.size());
+        logger.info("Sending {} tool results back to AI (recursionDepth={})", toolResults.size(), recursionDepth);
+        logger.info("Tool results payload: {}", toolResults);
+        
+        // Log the request with tool results
+        logAiRequest(newRequestBody, recursionDepth + 1);
         
         // Send back to AI for final response
+        logger.info(">>> Sending request to AI API with tool results (depth={})", recursionDepth + 1);
         return webClient.post()
                 .uri("/chat/completions")
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -229,6 +251,8 @@ public class AiChatService {
                 .bodyValue(newRequestBody)
                 .retrieve()
                 .bodyToMono(Map.class)
+                .doOnSuccess(response -> logger.info("<<< Received response from AI API (depth={})", recursionDepth + 1))
+                .doOnError(e -> logger.error(">>> AI API request failed: {}", e.getMessage()))
                 .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1));
     }
 
@@ -702,5 +726,40 @@ public class AiChatService {
         }
         
         return toolCalls;
+    }
+    
+    /**
+     * Log AI API request for debugging.
+     */
+    private void logAiRequest(Map<String, Object> requestBody, int depth) {
+        logger.info(">>> AI REQUEST (depth={}): Logging started", depth);
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> messages = (List<Map<String, Object>>) requestBody.get("messages");
+            int messageCount = messages != null ? messages.size() : 0;
+            
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tools = (List<Map<String, Object>>) requestBody.get("tools");
+            int toolCount = tools != null ? tools.size() : 0;
+            
+            String model = (String) requestBody.get("model");
+            
+            logger.info(">>> AI REQUEST (depth={}): model={}, messages={}, tools={}", 
+                depth, model, messageCount, toolCount);
+            
+            if (toolCount > 0) {
+                logger.debug("Tools: {}", tools);
+            }
+            
+            if (messageCount > 0) {
+                Map<String, Object> lastMessage = messages.get(messageCount - 1);
+                String role = (String) lastMessage.get("role");
+                String content = (String) lastMessage.get("content");
+                logger.debug("Last message [{}]: contentLength={}", role, content != null ? content.length() : 0);
+            }
+            
+        } catch (Exception e) {
+            logger.error("Failed to log AI request: {}", e.getMessage(), e);
+        }
     }
 }
