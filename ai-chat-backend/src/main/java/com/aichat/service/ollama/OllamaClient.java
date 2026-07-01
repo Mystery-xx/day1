@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
@@ -20,15 +21,16 @@ public class OllamaClient {
     @Value("${rag.ollama.base-url:http://host.docker.internal:11434}")
     private String ollamaBaseUrl;
     
-    private final WebClient webClient;
+    private WebClient webClient;
     private static final int MAX_RETRIES = 3;
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
     
-    public OllamaClient(WebClient.Builder webClientBuilder) {
+    @PostConstruct
+    public void init() {
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(TIMEOUT);
         
-        this.webClient = webClientBuilder
+        this.webClient = WebClient.builder()
             .baseUrl(ollamaBaseUrl)
             .clientConnector(new org.springframework.http.client.reactive.ReactorClientHttpConnector(httpClient))
             .build();

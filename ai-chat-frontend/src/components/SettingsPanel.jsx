@@ -1,10 +1,23 @@
 import { useState, useEffect } from 'react'
 import { useMcp } from '../hooks/useMcp'
+import UploadPanel from './rag/UploadPanel'
+import StatisticsPanel from './rag/StatisticsPanel'
+import SearchPanel from './rag/SearchPanel'
 
 const STRATEGY_OPTIONS = [
   { value: 'summary', label: 'Summary', description: 'Keep recent messages plus an AI-generated summary of older history' },
   { value: 'slidingWindow', label: 'Sliding Window', description: 'Keep only the last N messages' },
   { value: 'stickyFacts', label: 'Sticky Facts', description: 'Inject stored key-value facts as a system message plus recent messages' }
+]
+
+const TABS = [
+  { id: 'upload', label: '📤 Upload', description: 'Upload documents for RAG' },
+  { id: 'statistics', label: '📊 Statistics', description: 'RAG index statistics' },
+  { id: 'search', label: '🔍 Search', description: 'Search uploaded documents' },
+  { id: 'model', label: '🤖 Model', description: 'AI model settings' },
+  { id: 'context', label: '📚 Context', description: 'Context management' },
+  { id: 'mcp', label: '🔧 MCP', description: 'MCP servers' },
+  { id: 'session', label: '💬 Session', description: 'Session management' }
 ]
 
 function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory, sessions, onSessionSelect, onDeleteSession, sessionsLoading, onFactsRefreshed }) {
@@ -36,6 +49,9 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
   const [testToolName, setTestToolName] = useState('')
   const [testToolArgs, setTestToolArgs] = useState('{}')
   const [testResult, setTestResult] = useState(null)
+  
+  // Tab state
+  const [activeTab, setActiveTab] = useState('upload')
 
   // Load sticky facts for current session when strategy or session changes.
   useEffect(() => {
@@ -284,11 +300,51 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
 
   return (
     <div className="settings-panel">
-      <div className="settings-header">
-        <h3>Настройки модели</h3>
+      {/* Tab Navigation */}
+      <div className="settings-tabs" style={{
+        display: 'flex',
+        borderBottom: '1px solid #e0e0e0',
+        background: '#f9f9f9',
+        padding: '0 16px',
+        paddingTop: '16px'
+      }}>
+        {TABS.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            title={tab.description}
+            style={{
+              padding: '10px 16px',
+              marginRight: '4px',
+              background: activeTab === tab.id ? '#fff' : 'transparent',
+              border: 'none',
+              borderBottom: activeTab === tab.id ? '2px solid #4CAF50' : '2px solid transparent',
+              color: activeTab === tab.id ? '#4CAF50' : '#666',
+              fontWeight: activeTab === tab.id ? '600' : '400',
+              cursor: 'pointer',
+              fontSize: '13px',
+              transition: 'all 0.2s',
+              borderRadius: '4px 4px 0 0'
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="settings-content">
+      <div className="settings-content" style={{ padding: '16px' }}>
+        {/* Upload Panel Tab */}
+        {activeTab === 'upload' && <UploadPanel />}
+        
+        {/* Statistics Tab */}
+        {activeTab === 'statistics' && <StatisticsPanel />}
+        
+        {/* Search Panel Tab */}
+        {activeTab === 'search' && <SearchPanel />}
+        
+        {/* Model Settings Tab */}
+        {activeTab === 'model' && (
+        <>
         <div className="setting-item">
           <label htmlFor="provider">AI Provider</label>
           <select
@@ -453,7 +509,14 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
           <div className="setting-description">Если отключено, AI получает только текущее сообщение без истории диалога</div>
         </div>
 
-        <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
+        {/* Context section moved to context tab - removed from model tab */}
+        </>
+        )}
+        
+        {/* Context Management Tab */}
+        {activeTab === 'context' && (
+        <>
+        <div className="setting-item">
           <label htmlFor="contextStrategy">Context Strategy</label>
           <select
             id="contextStrategy"
@@ -641,7 +704,12 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
             )}
           </div>
         )}
-
+        </>
+        )}
+        
+        {/* MCP Servers Tab */}
+        {activeTab === 'mcp' && (
+        <>
         <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
           <label>MCP Servers</label>
           
@@ -930,6 +998,12 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
           )}
         </div>
 
+        </>
+        )}
+        
+        {/* Session Management Tab */}
+        {activeTab === 'session' && (
+        <>
         <div className="setting-item" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e0e0e0' }}>
           <label>Управление сессией</label>
           <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
@@ -1102,6 +1176,8 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
             )}
           </div>
         </div>
+        </>
+        )}
 
       </div>
     </div>

@@ -157,6 +157,116 @@ OK
 **POST /api/mcp/servers/{id}/disconnect** - Отключиться
 **GET /api/mcp/servers/{id}/tools** - Список инструментов
 
+### RAG Indexing API
+
+#### POST /api/rag/upload
+
+Upload a document for indexing.
+
+**Request:**
+- `file`: multipart file (.txt or .md, max 10MB)
+- `strategy`: chunking strategy (SEMANTIC or FIXED_SIZE, default: SEMANTIC)
+
+**curl:**
+```bash
+curl -X POST http://localhost:8082/api/rag/upload \
+  -F "file=@document.md" \
+  -F "strategy=SEMANTIC"
+```
+
+**Response:**
+```json
+{
+  "documentId": "test-1234567890",
+  "chunkCount": 5,
+  "strategy": "SEMANTIC",
+  "status": "SUCCESS"
+}
+```
+
+**Error Response:**
+```json
+{
+  "status": "FAILED",
+  "errorMessage": "File size exceeds 10MB limit"
+}
+```
+
+#### GET /api/rag/search
+
+Search indexed documents.
+
+**Request:**
+- `query`: search query (required)
+- `topK`: number of results (default: 10)
+
+**curl:**
+```bash
+curl "http://localhost:8082/api/rag/search?query=weather+api&topK=5"
+```
+
+**Response:**
+```json
+{
+  "query": "weather api",
+  "topK": 5,
+  "results": [
+    {
+      "chunkId": "test.md-0",
+      "content": "chunk content...",
+      "similarity": 0.95,
+      "metadata": {
+        "source": "test.md",
+        "title": "Weather API Documentation",
+        "section": "Introduction"
+      }
+    }
+  ]
+}
+```
+
+**Error Response:**
+```json
+{
+  "error": "Query parameter is required"
+}
+```
+
+#### DELETE /api/rag/documents/{source}
+
+Delete indexed document.
+
+**curl:**
+```bash
+curl -X DELETE http://localhost:8082/api/rag/documents/test.md
+```
+
+**Response:**
+```json
+{
+  "deleted": true,
+  "chunksDeleted": 5
+}
+```
+
+**Error Response:**
+```json
+{
+  "error": "Document not found: test.md"
+}
+```
+
+### Ollama Setup
+
+1. Install Ollama: https://ollama.ai
+2. Pull model: `ollama pull nomic-embed-text`
+3. Start Ollama: `ollama serve`
+
+### Chunking Strategies
+
+- **SEMANTIC**: Splits by Markdown headers, preserves structure, max 1000 tokens per section
+- **FIXED_SIZE**: Splits into fixed 500-word chunks with 50-word overlap
+
 ## Переменные окружения
 
 | Переменная | По умолчанию | Описание |

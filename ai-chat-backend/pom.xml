@@ -74,6 +74,19 @@
             <artifactId>spring-retry</artifactId>
         </dependency>
         
+        <!-- EclipseStore + JVector for vector storage -->
+        <dependency>
+            <groupId>org.eclipse.store</groupId>
+            <artifactId>gigamap-jvector</artifactId>
+            <version>4.0.1</version>
+        </dependency>
+        
+        <!-- Caffeine cache for embeddings -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+        
     </dependencies>
     
     <build>

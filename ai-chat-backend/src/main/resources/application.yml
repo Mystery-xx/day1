@@ -72,7 +72,7 @@ rag:
     overlap: 50
     semantic-max: 1000
   eclipse-store:
-    storage-path: ./data/rag-index
+    storage-path: /data/rag-index
     hnsw:
       m: 16
       ef-construction: 200
