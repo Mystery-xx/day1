@@ -14,7 +14,7 @@ services:
       - HUGGINGFACE_API_URL=${HUGGINGFACE_API_URL:-}
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true
+      - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8
     ports:
       - "8082:8082"
     networks:
