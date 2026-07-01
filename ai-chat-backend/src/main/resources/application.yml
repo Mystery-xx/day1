@@ -10,7 +10,7 @@ spring:
   webflux:
     max-in-memory-size: 16MB
   datasource:
-    url: jdbc:h2:file:/data/chatdb
+    url: jdbc:h2:file:./data/chatdb
     driverClassName: org.h2.Driver
     username: sa
     password: 
@@ -64,3 +64,18 @@ spring.main:
 spring.ai:
   retry:
     enabled: false
+
+rag:
+  chunking:
+    strategy: SEMANTIC
+    fixed-size: 500
+    overlap: 50
+    semantic-max: 1000
+  eclipse-store:
+    storage-path: ./data/rag-index
+    hnsw:
+      m: 16
+      ef-construction: 200
+      ef-search: 50
+  ollama:
+    base-url: ${OLLAMA_BASE_URL:http://host.docker.internal:11434}
