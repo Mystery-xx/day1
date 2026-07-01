@@ -51,10 +51,11 @@ public class FileUploadValidator {
             throw new FileTooLargeException(fileSize);
         }
         
-        // Check extension SECOND
+        // Check extension SECOND - handle compound extensions like .tar.gz, .Ru.txt
         String extension = getFileExtension(filename);
-        if (!ALLOWED_EXTENSIONS.contains(extension.toLowerCase())) {
-            logger.warn("Validation failed: invalid extension '{}' for file '{}'", extension, filename);
+        String normalizedExtension = extension.toLowerCase();
+        if (!ALLOWED_EXTENSIONS.contains(normalizedExtension)) {
+            logger.warn("Validation failed: invalid extension '{}' for file '{}'. Allowed: {}", extension, filename, ALLOWED_EXTENSIONS);
             throw new InvalidFileException(filename);
         }
         
@@ -78,6 +79,7 @@ public class FileUploadValidator {
     
     /**
      * Extracts file extension from filename.
+     * For compound extensions (e.g., .tar.gz, .Ru.txt), returns only the last part.
      * Returns empty string if no extension found.
      */
     private String getFileExtension(String filename) {
@@ -85,6 +87,23 @@ public class FileUploadValidator {
         if (lastDotIndex < 0 || lastDotIndex == filename.length() - 1) {
             return "";
         }
-        return filename.substring(lastDotIndex);
+        
+        // Extract extension after last dot
+        String extension = filename.substring(lastDotIndex);
+        
+        // Handle compound extensions like .Ru.txt -> .txt
+        // Find if there's another extension before this one
+        int secondLastDot = filename.lastIndexOf('.', lastDotIndex - 1);
+        if (secondLastDot > 0) {
+            // Check if the part between dots looks like a domain suffix (e.g., "Ru" in "TheLib.Ru.txt")
+            String middlePart = filename.substring(secondLastDot + 1, lastDotIndex);
+            // If middle part is short (2-3 chars) and alphabetic, it's likely a domain-like suffix
+            // In this case, use only the final extension
+            if (middlePart.length() <= 3 && middlePart.matches("[a-zA-Z]+")) {
+                return extension;
+            }
+        }
+        
+        return extension;
     }
 }
