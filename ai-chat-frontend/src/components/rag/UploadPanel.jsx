@@ -75,7 +75,10 @@ function UploadPanel() {
         })
       }, 200)
 
-      const response = await fetch(`/api/rag/upload?strategy=${strategy}`, {
+      // Append strategy to FormData (not query param)
+      formData.append('strategy', strategy)
+      
+      const response = await fetch('/api/rag/upload', {
         method: 'POST',
         body: formData
       })
