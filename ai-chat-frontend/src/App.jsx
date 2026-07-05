@@ -35,7 +35,8 @@ function App() {
       sendHistory: true,
       contextStrategy: 'summary',
       contextWindowSize: 10,
-      stickyFacts: {}
+      stickyFacts: {},
+      useRag: false
     }
     if (saved) {
       try {

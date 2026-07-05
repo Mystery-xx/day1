@@ -11,6 +11,7 @@ const STRATEGY_OPTIONS = [
 ]
 
 const TABS = [
+  { id: 'rag', label: '📎 RAG', description: 'RAG settings' },
   { id: 'upload', label: '📤 Upload', description: 'Upload documents for RAG' },
   { id: 'statistics', label: '📊 Statistics', description: 'RAG index statistics' },
   { id: 'search', label: '🔍 Search', description: 'Search uploaded documents' },
@@ -333,6 +334,27 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
       </div>
 
       <div className="settings-content" style={{ padding: '16px' }}>
+        {/* RAG Settings Tab */}
+        {activeTab === 'rag' && (
+          <>
+          <div className="setting-item">
+            <div className="setting-toggle-container">
+              <label htmlFor="useRag">Enable RAG</label>
+              <input
+                id="useRag"
+                type="checkbox"
+                className="toggle-switch"
+                checked={settings.useRag || false}
+                onChange={(e) => handleChange('useRag', e.target.checked)}
+              />
+            </div>
+            <div className="setting-description">
+              When enabled, the chat will search your uploaded documents and use them as context for better answers.
+            </div>
+          </div>
+          </>
+        )}
+        
         {/* Upload Panel Tab */}
         {activeTab === 'upload' && <UploadPanel />}
         
