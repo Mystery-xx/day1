@@ -6,6 +6,7 @@ import java.util.Map;
 public class ChatRequest {
     private String sessionId;
     private String message;
+    private Boolean useRag = false;
     private List<Message> history;
     private ModelSettings settings;
 
@@ -51,6 +52,14 @@ public class ChatRequest {
 
     public void setMessage(String message) {
         this.message = message;
+    }
+
+    public Boolean getUseRag() {
+        return useRag;
+    }
+
+    public void setUseRag(Boolean useRag) {
+        this.useRag = useRag;
     }
 
     public List<Message> getHistory() {
