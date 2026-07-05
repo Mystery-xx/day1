@@ -283,10 +283,8 @@ public class RagIndexingService {
     }
     
     private String generateSourceId(String filename) {
-        if (filename == null || filename.isEmpty()) {
-            return "unknown-" + System.currentTimeMillis();
-        }
-        return filename.replaceAll("[^a-zA-Z0-9]", "-") + "-" + System.currentTimeMillis();
+        // Use UUID for unique source ID (avoids encoding issues with non-ASCII filenames)
+        return "doc-" + java.util.UUID.randomUUID().toString().replace("-", "");
     }
     
     private String extractTitle(String filename) {
@@ -298,7 +296,7 @@ public class RagIndexingService {
         if (lastDotIndex > 0) {
             title = filename.substring(0, lastDotIndex);
         }
-        return title.replaceAll("[^a-zA-Z0-9\\s-]", "").trim();
+        return title;
     }
     
     private void rollback(List<DocumentChunk> chunks, String source) {

@@ -245,7 +245,7 @@ public class RagController {
             float[] queryEmbedding = indexingService.generateQueryEmbedding(query);
             List<VectorStorageService.SearchResult> rawResults = storageService.search(queryEmbedding, topK);
             
-            // Convert to DTO results
+            // Convert to DTO results with full metadata
             List<SearchResult> results = rawResults.stream()
                 .map(r -> {
                     Map<String, Object> metadata = new HashMap<>();
@@ -254,6 +254,10 @@ public class RagController {
                         metadata.put("title", r.getChunk().getTitle());
                         metadata.put("section", r.getChunk().getSection());
                         metadata.put("chunkIndex", r.getChunk().getChunkIndex());
+                        metadata.put("startToken", r.getChunk().getStartToken());
+                        metadata.put("endToken", r.getChunk().getEndToken());
+                        metadata.put("wordCount", r.getChunk().getWordCount());
+                        metadata.put("createdAt", r.getChunk().getCreatedAt());
                     }
                     return SearchResult.of(
                         r.getChunkId(),

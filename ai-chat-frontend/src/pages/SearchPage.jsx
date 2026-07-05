@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
-function SearchPanel() {
+function SearchPage() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
@@ -70,16 +71,51 @@ function SearchPanel() {
   }
 
   return (
-    <div className="search-panel">
-      <div className="search-header">
-        <h3>Search Documents</h3>
-        <p className="search-description">Search across uploaded documents using semantic similarity</p>
+    <div className="search-page">
+      {/* Navigation Header */}
+      <div className="page-header" style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '16px 24px',
+        background: '#fff',
+        borderBottom: '1px solid #e0e0e0',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+      }}>
+        <h1 style={{ margin: 0, fontSize: '24px', color: '#333' }}>
+          🔍 Document Search
+        </h1>
+        <Link
+          to="/"
+          style={{
+            padding: '10px 20px',
+            fontSize: '14px',
+            fontWeight: '600',
+            textDecoration: 'none',
+            color: '#2196F3',
+            border: '2px solid #2196F3',
+            borderRadius: '6px',
+            background: 'transparent',
+            transition: 'all 0.2s'
+          }}
+        >
+          ← Back to Chat
+        </Link>
       </div>
 
-      <div className="search-content">
+      <div className="search-content" style={{
+        padding: '24px',
+        maxWidth: '1400px',
+        margin: '0 auto'
+      }}>
         {/* Search Form */}
-        <form onSubmit={handleSearch} className="search-form">
-          <div className="search-input-group">
+        <form onSubmit={handleSearch} className="search-form" style={{
+          marginBottom: '24px'
+        }}>
+          <div className="search-input-group" style={{
+            display: 'flex',
+            gap: '10px'
+          }}>
             <input
               type="text"
               value={query}
@@ -102,7 +138,6 @@ function SearchPanel() {
               disabled={loading || !query.trim()}
               className="search-button"
               style={{
-                marginLeft: '10px',
                 padding: '12px 24px',
                 fontSize: '14px',
                 fontWeight: '600',
@@ -405,4 +440,4 @@ function SearchPanel() {
   )
 }
 
-export default SearchPanel
+export default SearchPage

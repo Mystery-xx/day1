@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
@@ -398,13 +399,51 @@ function App() {
         contextStrategy={settings.contextStrategy}
       />
       <div className="chat-section">
-        <div className="chat-header">
-          AI Chat
+        <div className="chat-header" style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          justifyContent: 'space-between'
+        }}>
+          <span style={{
+            flex: 1,
+            textAlign: 'center',
+            fontSize: '20px',
+            fontWeight: '600'
+          }}>
+            AI Chat
+          </span>
           {sessionId && (
-            <span className="session-id" title={sessionId}>
+            <span className="session-id" title={sessionId} style={{
+              fontSize: '12px',
+              opacity: 0.8
+            }}>
               Session: {sessionId.substring(0, 8)}...
             </span>
           )}
+          <Link
+            to="/search"
+            style={{
+              padding: '8px 16px',
+              fontSize: '13px',
+              fontWeight: '600',
+              textDecoration: 'none',
+              color: 'white',
+              border: '2px solid white',
+              borderRadius: '6px',
+              background: 'rgba(255,255,255,0.2)',
+              transition: 'all 0.2s',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseOver={(e) => {
+              e.target.style.background = 'rgba(255,255,255,0.3)'
+            }}
+            onMouseOut={(e) => {
+              e.target.style.background = 'rgba(255,255,255,0.2)'
+            }}
+          >
+            🔍 Search Documents
+          </Link>
         </div>
 
         <div className="chat-messages">

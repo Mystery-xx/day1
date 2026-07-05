@@ -20,7 +20,7 @@ public class SemanticChunkingStrategy implements ChunkingStrategy {
      */
     @Autowired
     public SemanticChunkingStrategy(FixedSizeChunkingStrategy fallbackStrategy) {
-        this(1000, fallbackStrategy);
+        this(1500, fallbackStrategy);  // Increased from 1000 to 1500 for better semantic coherence
     }
     
     /**
@@ -42,10 +42,19 @@ public class SemanticChunkingStrategy implements ChunkingStrategy {
             return chunks;
         }
         
+        System.out.println("[SEMANTIC-DEBUG] Starting semantic chunking for: " + source);
+        System.out.println("[SEMANTIC-DEBUG] Content length: " + content.length() + " chars");
+        
         // Parse headers and split by sections
         List<Section> sections = parseSections(content);
         
+        System.out.println("[SEMANTIC-DEBUG] Parsed " + sections.size() + " sections");
+        for (Section s : sections) {
+            System.out.println("[SEMANTIC-DEBUG]   Section: '" + s.header + "' - " + s.content.split("\\s+").length + " tokens");
+        }
+        
         if (sections.isEmpty()) {
+            System.out.println("[SEMANTIC-DEBUG] No sections found, falling back to fixed-size strategy");
             // Fallback to fixed-size if no headers
             return fallbackStrategy.chunk(content, source, title);
         }
@@ -54,32 +63,23 @@ public class SemanticChunkingStrategy implements ChunkingStrategy {
         for (Section section : sections) {
             String[] words = section.content.split("\\s+");
             
-            if (words.length <= maxTokensPerSection) {
-                // Section fits in one chunk
+            // Skip empty sections - they should be merged with previous section
+            if (words.length == 0 || (words.length == 1 && words[0].isEmpty())) {
+                System.out.println("[SEMANTIC-DEBUG] Skipping empty section: '" + section.header + "'");
+                continue;
+            }
+            
+            if (words.length <= maxTokensPerSection * 1.5) {
+                // Section fits in one chunk (with some tolerance)
                 DocumentChunk chunk = createChunk(section, source, title, chunkIndex++, 0, words.length);
                 chunks.add(chunk);
             } else {
-                // Split large section into sub-chunks
-                int subChunkIndex = 0;
-                for (int i = 0; i < words.length; i += maxTokensPerSection) {
-                    int end = Math.min(i + maxTokensPerSection, words.length);
-                    String[] subWords = new String[end - i];
-                    System.arraycopy(words, i, subWords, 0, subWords.length);
-                    
-                    DocumentChunk chunk = new DocumentChunk();
-                    chunk.setSource(source);
-                    chunk.setTitle(title);
-                    chunk.setSection(section.header + "-" + subChunkIndex);
-                    chunk.setChunkId(source + "-" + chunkIndex);
-                    chunk.setChunkIndex(chunkIndex++);
-                    chunk.setStartToken(i);
-                    chunk.setEndToken(end);
-                    chunk.setWordCount(subWords.length);
-                    chunk.setContent(String.join(" ", subWords));
-                    chunk.setCreatedAt(LocalDateTime.now());
-                    
-                    chunks.add(chunk);
-                    subChunkIndex++;
+                // Section still too large - use fallback strategy
+                List<DocumentChunk> fallbackChunks = fallbackStrategy.chunk(section.content, source, title);
+                for (DocumentChunk fallbackChunk : fallbackChunks) {
+                    fallbackChunk.setSection(section.header);
+                    fallbackChunk.setChunkIndex(chunkIndex++);
+                    chunks.add(fallbackChunk);
                 }
             }
         }
@@ -89,25 +89,62 @@ public class SemanticChunkingStrategy implements ChunkingStrategy {
     
     /**
      * Parses content into sections based on Markdown headers (#, ##, ###).
+     * Recursively splits large sections by sub-headers.
      * 
      * @param content The markdown content to parse
      * @return List of sections with headers and content
      */
     private List<Section> parseSections(String content) {
+        return parseSectionsRecursive(content, 0);
+    }
+    
+    /**
+     * Recursively parses sections, splitting large ones by sub-headers.
+     * Supports both Markdown headers (#) and plain text ALL CAPS headers.
+     * 
+     * @param content The content to parse
+     * @param headerLevel Current header level (0=none, 1=#, 2=##, etc.)
+     * @return List of sections
+     */
+    private List<Section> parseSectionsRecursive(String content, int headerLevel) {
         List<Section> sections = new ArrayList<>();
         String[] lines = content.split("\n");
         StringBuilder currentSection = new StringBuilder();
         String currentHeader = "";
+        int currentLevel = headerLevel;
         
         for (String line : lines) {
-            if (line.startsWith("#")) {
-                // Save previous section if exists
+            int lineLevel = getHeaderLevel(line);
+            boolean isPlainTextHeader = (lineLevel == 0) && isPlainTextHeader(line);
+            
+            if (lineLevel > 0 && lineLevel > headerLevel) {
+                // Markdown header found
                 if (!currentSection.isEmpty()) {
-                    sections.add(new Section(currentHeader, currentSection.toString().trim()));
+                    String sectionContent = currentSection.toString().trim();
+                    if (sectionContent.split("\\s+").length > maxTokensPerSection * 1.5) {
+                        sections.addAll(parseSectionsRecursive(sectionContent, lineLevel));
+                    } else {
+                        sections.add(new Section(currentHeader, sectionContent));
+                    }
                 }
-                // Extract header text (remove all # characters and trim)
-                currentHeader = line.replace("#", "").trim();
+                currentHeader = line.substring(lineLevel).trim();
+                currentLevel = lineLevel;
                 currentSection = new StringBuilder();
+            } else if (isPlainTextHeader && headerLevel == 0) {
+                // Plain text header (ALL CAPS) found in non-Markdown document
+                if (!currentSection.isEmpty()) {
+                    String sectionContent = currentSection.toString().trim();
+                    if (sectionContent.split("\\s+").length > maxTokensPerSection * 1.5) {
+                        sections.addAll(parseSectionsRecursive(sectionContent, 1));
+                    } else {
+                        sections.add(new Section(currentHeader, sectionContent));
+                    }
+                }
+                currentHeader = line.trim();
+                currentLevel = 1;
+                currentSection = new StringBuilder();
+            } else if (lineLevel > 0 && lineLevel <= headerLevel) {
+                currentSection.append(line).append(" ");
             } else {
                 currentSection.append(line).append(" ");
             }
@@ -115,10 +152,111 @@ public class SemanticChunkingStrategy implements ChunkingStrategy {
         
         // Add final section
         if (!currentSection.isEmpty()) {
-            sections.add(new Section(currentHeader, currentSection.toString().trim()));
+            String sectionContent = currentSection.toString().trim();
+            if (sectionContent.split("\\s+").length > maxTokensPerSection * 1.5 && headerLevel < 6) {
+                sections.addAll(parseSectionsRecursive(sectionContent, headerLevel + 1));
+            } else {
+                sections.add(new Section(currentHeader, sectionContent));
+            }
         }
         
         return sections;
+    }
+    
+    /**
+     * Gets the header level (1-6) for a line, or 0 if not a header.
+     * Supports both "# Header" and "#Header" formats (with or without space).
+     * Works with any Unicode characters including Cyrillic.
+     */
+    private int getHeaderLevel(String line) {
+        if (line == null || line.isEmpty()) return 0;
+        
+        // Trim leading whitespace
+        String trimmed = line.trim();
+        if (trimmed.isEmpty()) return 0;
+        
+        // Must start with #
+        if (trimmed.charAt(0) != '#') return 0;
+        
+        // Count consecutive '#' at start
+        int level = 0;
+        int i = 0;
+        while (i < trimmed.length() && trimmed.charAt(i) == '#') {
+            level++;
+            i++;
+        }
+        
+        // Valid levels: 1-6
+        if (level < 1 || level > 6) return 0;
+        
+        // After #'s: must have space + text, or just text (no space)
+        // Examples: "# Header", "#Header", "# Заголовок", "#Заголовок"
+        if (i >= trimmed.length()) {
+            // Just "###" with no text - not a valid header
+            return 0;
+        }
+        
+        // Check what follows the #'s
+        char nextChar = trimmed.charAt(i);
+        if (nextChar == ' ') {
+            // "# Header" - must have text after space
+            return (i + 1 < trimmed.length()) ? level : 0;
+        } else {
+            // "#Header" - any non-space char is valid start of header text
+            return level;
+        }
+    }
+    
+    /**
+     * Detects plain text headers in non-Markdown documents.
+     * Identifies ALL CAPS lines (Cyrillic or Latin) as potential headers.
+     * 
+     * Heuristics for plain text headers:
+     * - Line is mostly or entirely uppercase letters
+     * - Line is relatively short (< 100 chars)
+     * - Line contains no ending punctuation (no . ! ?)
+     * - Line contains at least one letter
+     * 
+     * Examples that match:
+     * - "ЗОЛОТОЙ КЛЮЧИК, или ПРИКЛЮЧЕНИЯ БУРАТИНО"
+     * - "ГЛАВА 1. НАЧАЛО ПРИКЛЮЧЕНИЙ"
+     * - "CHAPTER ONE: THE BEGINNING"
+     * 
+     * Examples that don't match:
+     * - "Это обычный текст с заглавными буквами."
+     * - "ОЧЕНЬ ДЛИННАЯ СТРОКА КОТОРАЯ ЯВЛЯЕТСЯ ОБЫЧНЫМ ТЕКСТОМ А НЕ ЗАГОЛОВКОМ..."
+     */
+    private boolean isPlainTextHeader(String line) {
+        if (line == null || line.isEmpty()) return false;
+        
+        String trimmed = line.trim();
+        if (trimmed.isEmpty()) return false;
+        
+        // Skip very long lines (likely body text)
+        if (trimmed.length() > 100) return false;
+        
+        // Skip lines with sentence-ending punctuation
+        if (trimmed.matches(".*[.!?]$")) return false;
+        
+        // Count uppercase vs total letters (supports Cyrillic and Latin)
+        int letterCount = 0;
+        int upperCount = 0;
+        
+        for (char c : trimmed.toCharArray()) {
+            if (Character.isLetter(c)) {
+                letterCount++;
+                if (Character.isUpperCase(c)) {
+                    upperCount++;
+                }
+            }
+        }
+        
+        // Must have at least 3 letters
+        if (letterCount < 3) return false;
+        
+        // At least 70% of letters must be uppercase
+        double upperRatio = (double) upperCount / letterCount;
+        return upperRatio >= 0.7;
     }
     
     /**
