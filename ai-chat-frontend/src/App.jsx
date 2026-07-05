@@ -171,6 +171,7 @@ function App() {
       const requestBody = {
         sessionId: sessionId,
         message: userMessage.content,
+        useRag: settings.useRag || false,
         settings: {
           ...settingsWithoutStop,
           // Only include stop if it has values
