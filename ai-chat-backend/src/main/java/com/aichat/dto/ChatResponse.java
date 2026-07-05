@@ -1,6 +1,7 @@
 package com.aichat.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Map;
 import java.util.List;
 
@@ -44,6 +45,7 @@ public class ChatResponse {
     private List<Map<String, Object>> toolResults;
     
     @JsonProperty("sources")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private List<SourceInfo> sources;
 
     public ChatResponse() {}
