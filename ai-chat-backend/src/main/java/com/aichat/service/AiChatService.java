@@ -73,11 +73,12 @@ public class AiChatService {
         logger.debug("Sending message to AI: {}", request.getMessage());
 
         Map<String, Object> requestBody;
+        RagContextResult ragResult = null;
         
         // RAG integration: if useRag is enabled, search and augment with context
         if (Boolean.TRUE.equals(request.getUseRag())) {
             logger.info("RAG enabled: query={}, topK=5", request.getMessage());
-            RagContextResult ragResult = ragSearchService.searchAndAugment(request.getMessage(), 5);
+            ragResult = ragSearchService.searchAndAugment(request.getMessage(), 5);
             
             // Build messages with RAG context as system message
             List<ChatMessageDTO> messages = new ArrayList<>();
@@ -112,6 +113,7 @@ public class AiChatService {
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
 
+        RagContextResult finalRagResult = ragResult;
         return requestWebClient.post()
                 .uri("/chat/completions")
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -120,13 +122,13 @@ public class AiChatService {
                 .retrieve()
                 .bodyToMono(Map.class)
                 .doOnSubscribe(subscription -> logger.info(">>> AI REQUEST (subscription): Sending to API"))
-                .flatMap(response -> handleAiResponse(response, requestBody, requestWebClient, apiKey, baseUrl, 0));
+                .flatMap(response -> handleAiResponse(response, requestBody, requestWebClient, apiKey, baseUrl, 0, finalRagResult));
     }
 
     private Mono<ChatResponse> handleAiResponse(Map<String, Object> response, 
-                                                 Map<String, Object> originalRequestBody,
-                                                 WebClient webClient, String apiKey, String baseUrl,
-                                                 int recursionDepth) {
+                                                  Map<String, Object> originalRequestBody,
+                                                  WebClient webClient, String apiKey, String baseUrl,
+                                                  int recursionDepth, RagContextResult ragResult) {
         if (recursionDepth > 10) {
             return Mono.just(ChatResponse.error("Too many tool call iterations"));
         }
@@ -169,6 +171,11 @@ public class AiChatService {
                     ChatResponse chatResponse = new ChatResponse(partialAnswer, null, model, usage);
                     chatResponse.setDebugRequest(originalRequestBody);
                     chatResponse.setDebugResponse(response);
+                    // Include RAG sources if available
+                    if (ragResult != null && ragResult.getSources() != null) {
+                        chatResponse.setSources(ragResult.getSources());
+                        logger.info("RAG sources included: count={}", ragResult.getSources().size());
+                    }
                     return Mono.just(chatResponse);
                 }
                 
@@ -184,6 +191,11 @@ public class AiChatService {
             ChatResponse chatResponse = new ChatResponse(content, null, model, usage);
             chatResponse.setDebugRequest(originalRequestBody);
             chatResponse.setDebugResponse(response);
+            // Include RAG sources if available
+            if (ragResult != null && ragResult.getSources() != null) {
+                chatResponse.setSources(ragResult.getSources());
+                logger.info("RAG sources included: count={}", ragResult.getSources().size());
+            }
             return Mono.just(chatResponse);
             
         } catch (Exception e) {
@@ -280,7 +292,7 @@ public class AiChatService {
                 .bodyToMono(Map.class)
                 .doOnSuccess(response -> logger.info("<<< Received response from AI API (depth={})", recursionDepth + 1))
                 .doOnError(e -> logger.error(">>> AI API request failed: {}", e.getMessage()))
-                .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1));
+                .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1, null));
     }
 
     public Map<String, Object> buildDebugRequest(ChatRequest request) {
