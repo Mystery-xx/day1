@@ -42,6 +42,9 @@ public class ChatResponse {
     
     @JsonProperty("toolResults")
     private List<Map<String, Object>> toolResults;
+    
+    @JsonProperty("sources")
+    private List<SourceInfo> sources;
 
     public ChatResponse() {}
 
@@ -183,5 +186,13 @@ public class ChatResponse {
 
     public void setToolResults(List<Map<String, Object>> toolResults) {
         this.toolResults = toolResults;
+    }
+
+    public List<SourceInfo> getSources() {
+        return sources;
+    }
+
+    public void setSources(List<SourceInfo> sources) {
+        this.sources = sources;
     }
 }
