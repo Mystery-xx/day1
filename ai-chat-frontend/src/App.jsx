@@ -272,7 +272,11 @@ function App() {
               if (response.error) {
                 setMessages(prev => [...prev, { role: 'system', content: `Error: ${response.error}` }])
               } else if (response.content) {
-                setMessages(prev => [...prev, { role: 'assistant', content: response.content }])
+                setMessages(prev => [...prev, { 
+                  role: 'assistant', 
+                  content: response.content,
+                  sources: response.debugResponse?.sources || []
+                }])
                 refresh()
                 fetchSessions()  // Update session list with new message count/timestamps
               } else {

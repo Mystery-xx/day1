@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown'
 import { ToolCallDisplay } from './ToolCallDisplay'
+import SourceCitation from './rag/SourceCitation'
 
 export function Message({ message, index, onBranch }) {
   const parseToolData = () => {
@@ -26,6 +27,9 @@ export function Message({ message, index, onBranch }) {
           />
         ))}
         <ReactMarkdown>{message.content}</ReactMarkdown>
+        {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+          <SourceCitation sources={message.sources} />
+        )}
       </div>
       {message.role === 'assistant' && (
         <button
