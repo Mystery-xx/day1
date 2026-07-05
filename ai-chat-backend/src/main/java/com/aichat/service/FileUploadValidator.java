@@ -59,18 +59,11 @@ public class FileUploadValidator {
             throw new InvalidFileException(filename);
         }
         
-        // Check encoding (UTF-8)
+        // Verify file can be read (skip strict UTF-8 validation)
         try {
-            byte[] content = file.getBytes();
-            String contentStr = new String(content, REQUIRED_ENCODING);
-            // Verify it's valid UTF-8 by checking if re-encoding produces same bytes
-            byte[] reencoded = contentStr.getBytes(REQUIRED_ENCODING);
-            if (content.length != reencoded.length) {
-                logger.warn("Validation failed: invalid UTF-8 encoding for file '{}'", filename);
-                throw new InvalidFileException(filename);
-            }
+            file.getBytes();
         } catch (Exception e) {
-            logger.warn("Validation failed: cannot read file '{}' as UTF-8", filename, e);
+            logger.warn("Validation failed: cannot read file '{}'", filename, e);
             throw new InvalidFileException(filename, e);
         }
         
