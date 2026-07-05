@@ -9,6 +9,7 @@ import com.aichat.dto.ChatResponse;
 import com.aichat.dto.ModelInfo;
 import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SummaryResult;
+import com.aichat.dto.RagContextResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -33,6 +34,7 @@ import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import com.aichat.service.McpClientService;
 import com.aichat.service.McpSessionClient;
+import com.aichat.service.RagSearchService;
 
 @Service
 public class AiChatService {
@@ -45,14 +47,17 @@ public class AiChatService {
     private final ChatHistoryService historyService;
     private final ContextStrategyFactory contextStrategyFactory;
     private final McpClientService mcpClientService;
+    private final RagSearchService ragSearchService;
 
     public AiChatService(AiChatProperties properties, ChatHistoryService historyService,
-                         ContextStrategyFactory contextStrategyFactory, McpClientService mcpClientService) {
+                         ContextStrategyFactory contextStrategyFactory, McpClientService mcpClientService,
+                         RagSearchService ragSearchService) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         this.historyService = historyService;
         this.contextStrategyFactory = contextStrategyFactory;
         this.mcpClientService = mcpClientService;
+        this.ragSearchService = ragSearchService;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(120));
@@ -67,7 +72,29 @@ public class AiChatService {
     public Mono<ChatResponse> sendMessage(ChatRequest request) {
         logger.debug("Sending message to AI: {}", request.getMessage());
 
-        Map<String, Object> requestBody = buildRequestBody(request);
+        Map<String, Object> requestBody;
+        
+        // RAG integration: if useRag is enabled, search and augment with context
+        if (Boolean.TRUE.equals(request.getUseRag())) {
+            logger.info("RAG enabled: query={}, topK=5", request.getMessage());
+            RagContextResult ragResult = ragSearchService.searchAndAugment(request.getMessage(), 5);
+            
+            // Build messages with RAG context as system message
+            List<ChatMessageDTO> messages = new ArrayList<>();
+            ChatMessageDTO systemMessage = new ChatMessageDTO();
+            systemMessage.setRole("system");
+            systemMessage.setContent(ragResult.getContext());
+            messages.add(systemMessage);
+            ChatMessageDTO userMessage = new ChatMessageDTO();
+            userMessage.setRole("user");
+            userMessage.setContent(request.getMessage());
+            messages.add(userMessage);
+            
+            requestBody = buildRequestBodyWithMessages(request, messages);
+        } else {
+            // Standard flow without RAG
+            requestBody = buildRequestBody(request);
+        }
         
         ChatRequest.ModelSettings requestSettings = request.getSettings();
         String provider = requestSettings != null ? requestSettings.getProvider() : properties.getProvider();
@@ -389,43 +416,26 @@ public class AiChatService {
         return "medium";
     }
 
-    private Map<String, Object> buildRequestBody(ChatRequest request) {
-        List<Map<String, String>> messages = new ArrayList<>();
+    private Map<String, Object> buildRequestBodyWithMessages(ChatRequest request, List<ChatMessageDTO> messages) {
+        List<Map<String, String>> messageMaps = new ArrayList<>();
+        
+        // Convert ChatMessageDTO to Map format
+        for (ChatMessageDTO msg : messages) {
+            Map<String, String> message = new HashMap<>();
+            message.put("role", msg.getRole());
+            message.put("content", msg.getContent());
+            messageMaps.add(message);
+        }
 
+        Map<String, Object> requestBody = new HashMap<>();
+        
         ChatRequest.ModelSettings requestSettings = request.getSettings();
         String model = (requestSettings != null && requestSettings.getModel() != null)
             ? requestSettings.getModel()
             : properties.getModel();
-        String provider = requestSettings != null ? requestSettings.getProvider() : null;
-
-        String sessionId = request.getSessionId();
-        logger.debug("Building request for session {} with strategy {}", sessionId,
-                requestSettings != null ? requestSettings.getContextStrategy() : "default");
-        if (sessionId != null && !sessionId.isEmpty() && shouldSendHistory(requestSettings)) {
-            ContextStrategyType strategyType = ContextStrategyType.fromString(
-                    requestSettings != null ? requestSettings.getContextStrategy() : null);
-            ContextStrategy strategy = contextStrategyFactory.createStrategy(strategyType);
-            List<ChatMessageDTO> history = strategy.buildContext(sessionId, requestSettings);
-            for (var msg : history) {
-                Map<String, String> message = new HashMap<>();
-                message.put("role", msg.getRole());
-                message.put("content", msg.getContent());
-                messages.add(message);
-            }
-        }
-
-        // Add current user message
-        Map<String, String> userMessage = new HashMap<>();
-        userMessage.put("role", "user");
-        userMessage.put("content", request.getMessage());
-        messages.add(userMessage);
-
-        Map<String, Object> requestBody = new HashMap<>();
         
-        // Use model from request settings, fall back to properties
         requestBody.put("model", model);
-        
-        requestBody.put("messages", messages);
+        requestBody.put("messages", messageMaps);
         requestBody.put("stream", false);
         
         // Add MCP tool definitions for AI function calling
@@ -436,8 +446,13 @@ public class AiChatService {
             logger.debug("Added {} MCP tool definitions to request", mcpTools.size());
         }
         
-        // Use request settings if provided, otherwise fall back to properties
+        // Apply model settings
+        applyModelSettings(requestBody, requestSettings);
         
+        return requestBody;
+    }
+
+    private void applyModelSettings(Map<String, Object> requestBody, ChatRequest.ModelSettings requestSettings) {
         if (requestSettings != null) {
             if (requestSettings.getTemperature() != null) {
                 requestBody.put("temperature", requestSettings.getTemperature());
@@ -446,8 +461,6 @@ public class AiChatService {
             }
             
             if (requestSettings.getMaxTokens() != null) {
-                // Only send max_tokens if it's not the default maximum value (16384)
-                // This allows APIs to use their own defaults when not explicitly needed
                 if (requestSettings.getMaxTokens() != 16384) {
                     requestBody.put("max_tokens", requestSettings.getMaxTokens());
                 }
@@ -498,6 +511,57 @@ public class AiChatService {
                 requestBody.put("stop", properties.getStop());
             }
         }
+    }
+
+    private Map<String, Object> buildRequestBody(ChatRequest request) {
+        List<Map<String, String>> messages = new ArrayList<>();
+
+        ChatRequest.ModelSettings requestSettings = request.getSettings();
+        String model = (requestSettings != null && requestSettings.getModel() != null)
+            ? requestSettings.getModel()
+            : properties.getModel();
+        String provider = requestSettings != null ? requestSettings.getProvider() : null;
+
+        String sessionId = request.getSessionId();
+        logger.debug("Building request for session {} with strategy {}", sessionId,
+                requestSettings != null ? requestSettings.getContextStrategy() : "default");
+        if (sessionId != null && !sessionId.isEmpty() && shouldSendHistory(requestSettings)) {
+            ContextStrategyType strategyType = ContextStrategyType.fromString(
+                    requestSettings != null ? requestSettings.getContextStrategy() : null);
+            ContextStrategy strategy = contextStrategyFactory.createStrategy(strategyType);
+            List<ChatMessageDTO> history = strategy.buildContext(sessionId, requestSettings);
+            for (var msg : history) {
+                Map<String, String> message = new HashMap<>();
+                message.put("role", msg.getRole());
+                message.put("content", msg.getContent());
+                messages.add(message);
+            }
+        }
+
+        // Add current user message
+        Map<String, String> userMessage = new HashMap<>();
+        userMessage.put("role", "user");
+        userMessage.put("content", request.getMessage());
+        messages.add(userMessage);
+
+        Map<String, Object> requestBody = new HashMap<>();
+        
+        // Use model from request settings, fall back to properties
+        requestBody.put("model", model);
+        
+        requestBody.put("messages", messages);
+        requestBody.put("stream", false);
+        
+        // Add MCP tool definitions for AI function calling
+        List<Map<String, Object>> mcpTools = mcpClientService.getToolDefinitionsForAI();
+        if (!mcpTools.isEmpty()) {
+            requestBody.put("tools", mcpTools);
+            requestBody.put("tool_choice", "auto");
+            logger.debug("Added {} MCP tool definitions to request", mcpTools.size());
+        }
+        
+        // Apply model settings
+        applyModelSettings(requestBody, requestSettings);
 
         return requestBody;
     }
