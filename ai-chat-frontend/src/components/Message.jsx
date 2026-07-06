@@ -16,6 +16,9 @@ export function Message({ message, index, onBranch }) {
   const { toolCalls, toolResults } = parseToolData()
   const hasToolCalls = toolCalls && toolCalls.length > 0
 
+  // Strip <think>...</think> reasoning blocks from model output
+  const displayContent = (message.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+
   return (
     <div className={`message-wrapper ${message.role}`}>
       <div className="message-content">
@@ -26,7 +29,7 @@ export function Message({ message, index, onBranch }) {
             toolResult={toolResults ? toolResults[toolIndex] : null}
           />
         ))}
-        <ReactMarkdown>{message.content}</ReactMarkdown>
+        {displayContent && <ReactMarkdown>{displayContent}</ReactMarkdown>}
         {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
           <SourceCitation sources={message.sources} />
         )}
