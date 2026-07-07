@@ -131,6 +131,80 @@ public class VectorStorageService implements AutoCloseable {
     }
     
     /**
+     * Search by metadata (title, source, section) using case-insensitive contains match.
+     * Supports compound queries like "Document+Name+Section+Name" for precise matching.
+     * @param query the search query to match against title and source
+     * @param topK number of results to return
+     * @return list of SearchResult sorted by chunk index
+     */
+    public List<SearchResult> searchByMetadata(String query, int topK) {
+        if (query == null || query.isBlank() || vectors.isEmpty()) {
+            logger.debug("Empty metadata search: query={}, vectors.size()={}", query, vectors.size());
+            return new ArrayList<>();
+        }
+        
+        try {
+            // Try to parse compound query "Title Section" format
+            // Split by common delimiters: spaces, +, or multiple spaces
+            String[] parts = query.trim().split("[\\s+]+");
+            
+            String targetTitle = null;
+            String targetSection = null;
+            
+            // If we have multiple parts, assume first part(s) are title, last part(s) are section
+            if (parts.length >= 2) {
+                // Heuristic: try to find title and section from the parts
+                // For simplicity, use first half as title, second half as section
+                int mid = parts.length / 2;
+                targetTitle = String.join(" ", java.util.Arrays.copyOfRange(parts, 0, mid)).toLowerCase().trim();
+                targetSection = String.join(" ", java.util.Arrays.copyOfRange(parts, mid, parts.length)).toLowerCase().trim();
+                logger.debug("Compound query detected: title='{}', section='{}'", targetTitle, targetSection);
+            }
+            
+            String normalizedQuery = query.toLowerCase().trim();
+            List<SearchResult> results = new ArrayList<>();
+            
+            // Filter vectors by metadata match
+            for (StoredVector stored : vectors.values()) {
+                if (stored.chunk != null) {
+                    String title = stored.chunk.getTitle() != null ? stored.chunk.getTitle().toLowerCase() : "";
+                    String source = stored.chunk.getSource() != null ? stored.chunk.getSource().toLowerCase() : "";
+                    String section = stored.chunk.getSection() != null ? stored.chunk.getSection().toLowerCase() : "";
+                    
+                    boolean matches = false;
+                    
+                    // If we have compound query, match both title AND section
+                    if (targetTitle != null && targetSection != null) {
+                        boolean titleMatches = title.contains(targetTitle) || source.contains(targetTitle);
+                        boolean sectionMatches = section.contains(targetSection);
+                        matches = titleMatches && sectionMatches;
+                    } else {
+                        // Fallback to simple contains match for single-word queries
+                        matches = title.contains(normalizedQuery) || source.contains(normalizedQuery) || section.contains(normalizedQuery);
+                    }
+                    
+                    if (matches) {
+                        // Use high similarity score for metadata matches (higher than typical vector similarity)
+                        results.add(new SearchResult(stored.chunkId, stored.chunk, 0.95));
+                    }
+                }
+            }
+            
+            // Sort by chunk index to get coherent results from the same document
+            List<SearchResult> sorted = results.stream()
+                .sorted(Comparator.comparing(r -> r.chunk != null ? r.chunk.getChunkIndex() : Integer.MAX_VALUE))
+                .limit(topK)
+                .collect(Collectors.toList());
+            
+            logger.debug("Metadata search completed: found {} results for query '{}'", sorted.size(), query);
+            return sorted;
+        } catch (Exception e) {
+            logger.error("Failed to search by metadata", e);
+            throw new VectorStorageException("Failed to search by metadata", e);
+        }
+    }
+    
+    /**
      * Delete all vectors associated with a specific source document.
      * @param source the source identifier (file path or URL)
      */

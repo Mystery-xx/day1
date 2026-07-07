@@ -25,6 +25,9 @@ import java.util.stream.Collectors;
 public class RagSearchService {
     private static final Logger logger = LoggerFactory.getLogger(RagSearchService.class);
     
+    /** Minimum rerank score threshold (0.5 = 50%). Sources below this are discarded after reranking. */
+    private static final double RERANK_THRESHOLD = 0.5;
+    
     private final VectorStorageService storageService;
     private final RagIndexingService indexingService;
     private final RerankService rerankService;
@@ -80,18 +83,26 @@ public class RagSearchService {
         
         logger.info("RAG search: query={}, topK={}, found={} candidates", query, topK, candidateResults.size());
         
-        // 4. Reranking flow (if enabled)
+        // 4. Apply similarity threshold filter - discard sources below threshold
+        List<SearchResult> filteredResults = candidateResults.stream()
+            .filter(r -> r.getSimilarity() >= threshold)
+            .collect(Collectors.toList());
+        
+        logger.info("Similarity filter: {} candidates -> {} results above threshold={}", 
+            candidateResults.size(), filteredResults.size(), threshold);
+        
+        // 5. Reranking flow (if enabled)
         List<SearchResult> finalResults;
         List<Double> rerankScores = null;
         
-        if (rerank && !candidateResults.isEmpty()) {
+        if (rerank && !filteredResults.isEmpty()) {
             // Extract document texts for reranking
-            List<String> candidateTexts = candidateResults.stream()
+            List<String> candidateTexts = filteredResults.stream()
                 .map(r -> r.getChunk() != null ? r.getChunk().getContent() : "")
                 .collect(Collectors.toList());
             
             // Call rerank service
-            List<RerankedDocument> rerankedDocs = rerankService.rerank(query, candidateTexts, candidatesToFetch);
+            List<RerankedDocument> rerankedDocs = rerankService.rerank(query, candidateTexts, filteredResults.size());
             
             logger.info("Reranking {} candidates, {} passed threshold", 
                 candidateResults.size(), rerankedDocs.size());
@@ -99,7 +110,7 @@ public class RagSearchService {
             // Filter by threshold and take top K
             int maxResults = Math.min(topK, rerankProperties.getTopKAfter());
             List<RerankedDocument> filteredDocs = rerankedDocs.stream()
-                .filter(doc -> doc.getScore() >= threshold)
+                .filter(doc -> doc.getScore() >= threshold && doc.getScore() >= RERANK_THRESHOLD)
                 .limit(maxResults)
                 .collect(Collectors.toList());
             
@@ -125,18 +136,29 @@ public class RagSearchService {
                 .collect(Collectors.toList());
         }
         
-        // 5. Format context
+        // 6. Check if any sources remain after filtering
+        if (finalResults.isEmpty()) {
+            logger.warn("RAG search: no sources above threshold={}", threshold);
+            // Return empty result - AI will respond "I don't know"
+            return new RagContextResult("", new ArrayList<>(), null, queryWasRewritten);
+        }
+        
+        // 7. Format context
         String context = formatContext(finalResults);
         
-        // 6. Build sources list
+        // 8. Build sources list with rerank scores if available
         List<SourceInfo> sources = new ArrayList<>();
         for (int i = 0; i < finalResults.size(); i++) {
             SearchResult result = finalResults.get(i);
+            Double rerankScore = (rerankScores != null && i < rerankScores.size()) 
+                ? rerankScores.get(i) 
+                : null;
             sources.add(new SourceInfo(
                 result.getChunk().getSource(),
                 result.getChunk().getTitle(),
                 result.getChunk().getSection(),
-                result.getSimilarity()
+                result.getSimilarity(),
+                rerankScore
             ));
         }
         
@@ -156,6 +178,47 @@ public class RagSearchService {
     }
     
     /**
+     * Perform hybrid search combining metadata and vector similarity search.
+     * First searches by title/source metadata, then falls back to vector search.
+     * Results are deduplicated and merged.
+     * 
+     * @param query the search query
+     * @param topK number of results to return
+     * @return list of SearchResult sorted by relevance
+     */
+    public List<SearchResult> hybridSearch(String query, int topK) {
+        logger.info("Hybrid search: query={}, topK={}", query, topK);
+        
+        if (query == null || query.isBlank()) {
+            logger.warn("Hybrid search query is empty");
+            return new ArrayList<>();
+        }
+        
+        try {
+            // 1. Search by metadata (title, source, section)
+            List<SearchResult> metadataResults = storageService.searchByMetadata(query, topK);
+            logger.debug("Metadata search found {} results", metadataResults.size());
+            
+            // 2. If metadata search found results, return them
+            if (!metadataResults.isEmpty()) {
+                logger.info("Hybrid search: returning {} metadata results", metadataResults.size());
+                return metadataResults;
+            }
+            
+            // 3. Fallback to vector search
+            float[] queryEmbedding = indexingService.generateQueryEmbedding(query);
+            List<SearchResult> vectorResults = storageService.search(queryEmbedding, topK);
+            logger.info("Hybrid search: metadata not found, returning {} vector results", vectorResults.size());
+            
+            return vectorResults;
+            
+        } catch (Exception e) {
+            logger.error("Hybrid search failed for query '{}': {}", query, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
      * Format search results into a context string for LLM.
      * @param results list of search results with similarity scores
      * @return formatted context string
@@ -169,17 +232,21 @@ public class RagSearchService {
         context.append("Use the following context from the knowledge base to answer the user's question.\n\n");
         context.append("INSTRUCTIONS:\n");
         context.append("1. Answer based ONLY on the context below.\n");
-        context.append("2. At the end of your answer, add a \"Sources:\" line listing the documents used.\n");
-        context.append("3. Format: \"Sources: [document-name] - [section-name]\"\n\n");
+        context.append("2. If the context doesn't contain enough information, say you don't know and ask to clarify the question.\n");
+        context.append("3. Reference sources by number in square brackets, e.g. [1], [2], when using information from them.\n");
+        context.append("4. Cite sources naturally in the text where relevant.\n\n");
+        context.append("SOURCES:\n");
         
+        int index = 1;
         for (SearchResult result : results) {
-            context.append("[Source: ")
+            context.append("[").append(index).append("] ")
                    .append(result.getChunk().getTitle())
-                   .append(", section \"")
+                   .append(" - ")
                    .append(result.getChunk().getSection())
-                   .append("\"]\n");
+                   .append(":\n");
             context.append(result.getChunk().getContent())
                    .append("\n\n");
+            index++;
         }
         
         return context.toString();
