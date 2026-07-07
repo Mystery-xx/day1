@@ -90,7 +90,13 @@ public class AiChatService {
             // 1. Add RAG context as system message
             ChatMessageDTO ragSystemMessage = new ChatMessageDTO();
             ragSystemMessage.setRole("system");
-            ragSystemMessage.setContent(ragResult.getContext());
+            
+            // If RAG found no relevant sources (all below 50% threshold), instruct AI to say "I don't know"
+            if (ragResult.getContext() == null || ragResult.getContext().isBlank()) {
+                ragSystemMessage.setContent("You don't have enough information to answer this question because no relevant documents were found in the knowledge base. Politely tell the user that you don't know the answer and ask them to clarify or rephrase their question.");
+            } else {
+                ragSystemMessage.setContent(ragResult.getContext());
+            }
             messages.add(ragSystemMessage);
             
             // 2. Add conversation history (if sessionId provided and sendHistory is true)
@@ -215,8 +221,9 @@ public class AiChatService {
             ChatResponse chatResponse = new ChatResponse(content, null, model, usage);
             chatResponse.setDebugRequest(originalRequestBody);
             chatResponse.setDebugResponse(response);
-            // Include RAG sources if available
-            if (ragResult != null && ragResult.getSources() != null) {
+            // Include RAG sources only if context is not empty (sources passed 50% threshold)
+            // If context is empty, AI was instructed to say "I don't know" - no sources to display
+            if (ragResult != null && ragResult.getSources() != null && !ragResult.getSources().isEmpty()) {
                 chatResponse.setSources(ragResult.getSources());
                 logger.info("RAG sources included: count={}", ragResult.getSources().size());
             }

@@ -76,6 +76,7 @@ public class ChatController {
         final String finalSessionId = sessionId;
         
         ObjectMapper mapper = new ObjectMapper();
+        mapper.setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS);
         
         return Flux.create(emitter -> {
             try {
