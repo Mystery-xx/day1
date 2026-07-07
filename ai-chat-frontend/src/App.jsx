@@ -58,7 +58,6 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // Load messages from backend history when it changes
   useEffect(() => {
     if (backendHistory.length > 0) {
       const convertedMessages = backendHistory.map(msg => ({
@@ -73,7 +72,7 @@ function App() {
       setTimeout(() => scrollToBottom(), 100)
       setTimeout(() => inputRef.current?.focus(), 150)
     }
-  }, [backendHistory])
+  }, [sessionId])
 
   useEffect(() => {
     scrollToBottom()
@@ -284,7 +283,7 @@ function App() {
                   content: response.content || '(No answer generated, but sources are available below)',
                   sources: response.sources || []
                 }])
-                refresh()
+                // Don't call refresh() - it reloads from backend which doesn't have sources
                 fetchSessions()  // Update session list with new message count/timestamps
               }
             }
