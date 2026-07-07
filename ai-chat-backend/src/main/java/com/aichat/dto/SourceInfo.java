@@ -1,5 +1,7 @@
 package com.aichat.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  * DTO representing information about a source document used in RAG context.
  */
@@ -8,6 +10,7 @@ public class SourceInfo {
     private String title;
     private String section;
     private double similarity;
+    private Double rerankScore;
     
     public SourceInfo() {
     }
@@ -17,6 +20,14 @@ public class SourceInfo {
         this.title = title;
         this.section = section;
         this.similarity = similarity;
+    }
+    
+    public SourceInfo(String source, String title, String section, double similarity, Double rerankScore) {
+        this.source = source;
+        this.title = title;
+        this.section = section;
+        this.similarity = similarity;
+        this.rerankScore = rerankScore;
     }
     
     public String getSource() {
@@ -49,5 +60,14 @@ public class SourceInfo {
     
     public void setSimilarity(double similarity) {
         this.similarity = similarity;
+    }
+    
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public Double getRerankScore() {
+        return rerankScore;
+    }
+    
+    public void setRerankScore(Double rerankScore) {
+        this.rerankScore = rerankScore;
     }
 }

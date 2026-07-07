@@ -316,6 +316,119 @@ public class RagController {
     }
 
     /**
+     * Hybrid search combining metadata and vector similarity search.
+     * First searches by title/source/section metadata, then falls back to vector search.
+     * 
+     * @param query the search query
+     * @param topK number of results to return (default: 10)
+     * @return list of search results with metadata match or vector similarity scores
+     */
+    @GetMapping("/search/hybrid")
+    @Operation(
+        summary = "Hybrid RAG search - metadata + vector similarity",
+        description = "Hybrid search that first tries to match by document title, source, or section. " +
+            "If metadata match found, returns those results. Otherwise falls back to vector similarity search."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Hybrid search results",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = SearchResponse.class),
+                examples = @ExampleObject(
+                    name = "Metadata match",
+                    summary = "Found documents by title",
+                    value = """
+                        {
+                          "query": "weather api",
+                          "topK": 10,
+                          "results": [
+                            {
+                              "chunkId": "weather-md-0",
+                              "content": "The Weather API provides...",
+                              "similarity": 0.95,
+                              "metadata": {
+                                "source": "weather.md",
+                                "title": "Weather API Documentation",
+                                "section": "Introduction"
+                              }
+                            }
+                          ]
+                        }
+                        """
+                )
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Bad request - empty or missing query parameter",
+            content = @Content
+        ),
+        @ApiResponse(
+            responseCode = "500",
+            description = "Internal server error",
+            content = @Content
+        )
+    })
+    public ResponseEntity<SearchResponse> hybridSearch(
+            @Parameter(
+                description = "Search query text",
+                required = true,
+                example = "weather api documentation"
+            )
+            @RequestParam String query,
+            @Parameter(
+                description = "Number of results to return (default: 10)",
+                required = false,
+                example = "10"
+            )
+            @RequestParam(defaultValue = "10") int topK) {
+        
+        logger.info("Received hybrid search request: query='{}', topK={}", query, topK);
+
+        if (query == null || query.isBlank()) {
+            logger.warn("Hybrid search query is empty");
+            return ResponseEntity.badRequest().build();
+        }
+
+        try {
+            List<VectorStorageService.SearchResult> rawResults = ragSearchService.hybridSearch(query, topK);
+            
+            // Convert to DTO results with full metadata
+            List<SearchResult> results = rawResults.stream()
+                .map(r -> {
+                    Map<String, Object> metadata = new HashMap<>();
+                    if (r.getChunk() != null) {
+                        metadata.put("source", r.getChunk().getSource());
+                        metadata.put("title", r.getChunk().getTitle());
+                        metadata.put("section", r.getChunk().getSection());
+                        metadata.put("chunkIndex", r.getChunk().getChunkIndex());
+                        metadata.put("startToken", r.getChunk().getStartToken());
+                        metadata.put("endToken", r.getChunk().getEndToken());
+                        metadata.put("wordCount", r.getChunk().getWordCount());
+                        metadata.put("createdAt", r.getChunk().getCreatedAt());
+                    }
+                    return SearchResult.of(
+                        r.getChunkId(),
+                        r.getChunk() != null ? r.getChunk().getContent() : "",
+                        r.getSimilarity(),
+                        metadata
+                    );
+                })
+                .toList();
+            
+            SearchResponse response = SearchResponse.of(query, topK, results);
+            logger.debug("Hybrid search completed: found {} results", results.size());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Hybrid search failed for query '{}': {}", query, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
      * Enhanced RAG search with optional reranking and query rewriting.
      * Supports advanced retrieval features for improved result quality.
      * 
