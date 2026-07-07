@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 function SearchPanel() {
-  const [query, setQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const [query, setQuery] = useState(() => 
+    searchParams.get('query') || ''
+  )
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
@@ -18,6 +22,16 @@ function SearchPanel() {
     localStorage.setItem('rag-rerank-enabled', JSON.stringify(rerankEnabled))
   }, [rerankEnabled])
 
+  useEffect(() => {
+    const urlQuery = searchParams.get('query')
+    if (urlQuery?.trim() && !searched) {
+      setQuery(urlQuery)
+      setTimeout(() => {
+        handleSearch({ preventDefault: () => {} })
+      }, 100)
+    }
+  }, [searchParams])
+
   const handleSearch = async (e) => {
     e.preventDefault()
     if (!query.trim()) {
@@ -31,7 +45,8 @@ function SearchPanel() {
     setResults([])
 
     try {
-      const response = await fetch(`/api/rag/search/enhanced?query=${encodeURIComponent(query)}&topK=10&rerank=${rerankEnabled}&threshold=0.5&rewrite=false`)
+      // Use hybrid search - first tries metadata match, then falls back to vector search
+      const response = await fetch(`/api/rag/search/hybrid?query=${encodeURIComponent(query)}&topK=10`)
       
       if (!response.ok) {
         throw new Error(`Search failed with status ${response.status}`)
