@@ -225,6 +225,57 @@ curl "http://localhost:8082/api/rag/search?query=weather+api&topK=5"
 }
 ```
 
+#### GET /api/rag/search/enhanced
+
+Enhanced RAG search with optional reranking and query rewriting for improved result quality.
+
+**Flow:** rewrite query → embed → vector search (top 20) → rerank → filter by threshold → take top 5
+
+**Request:**
+- `query`: search query (required)
+- `topK`: number of results to return (default: 5)
+- `rerank`: enable reranking (default: false)
+- `threshold`: reranking score threshold for filtering (default: 0.5)
+- `rewrite`: enable query rewriting (default: false)
+
+**curl - Basic search with reranking:**
+```bash
+curl "http://localhost:8082/api/rag/search/enhanced?query=machine+learning&rerank=true&threshold=0.7"
+```
+
+**curl - Disable reranking:**
+```bash
+curl "http://localhost:8082/api/rag/search/enhanced?query=machine+learning&rerank=false"
+```
+
+**curl - Query rewriting enabled:**
+```bash
+curl "http://localhost:8082/api/rag/search/enhanced?query=rag+pipeline&rewrite=true"
+```
+
+**Response:**
+```json
+{
+  "context": "Use the following context from the knowledge base:\n\n...",
+  "sources": [
+    {
+      "source": "ml.md",
+      "title": "Machine Learning",
+      "section": "Introduction",
+      "similarity": 0.92
+    }
+  ],
+  "rerankScores": [0.95, 0.87, 0.76],
+  "queryWasRewritten": true
+}
+```
+
+**Response Fields:**
+- `context`: Formatted context string for RAG prompts
+- `sources`: List of source documents with metadata
+- `rerankScores`: Array of reranking scores for each result (null if rerank disabled)
+- `queryWasRewritten`: Boolean indicating if query was successfully rewritten
+
 **Error Response:**
 ```json
 {
@@ -262,6 +313,37 @@ curl -X DELETE http://localhost:8082/api/rag/documents/test.md
 2. Pull model: `ollama pull nomic-embed-text`
 3. Start Ollama: `ollama serve`
 
+### TEI Reranker Setup
+
+TEI (Text Embeddings Inference) provides reranking for improved search relevance.
+
+**Docker Compose (included):**
+```yaml
+services:
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: tei-reranker
+    ports:
+      - "8099:80"
+    volumes:
+      - ./models:/data
+    command: --model-id BAAI/bge-reranker-v2-m3
+    networks:
+      - ai-chat-network
+```
+
+**Start TEI:**
+```bash
+docker-compose up tei-reranker
+```
+
+**Verify:**
+```bash
+curl http://localhost:8099/health
+```
+
+**Note:** First startup takes 30-60 seconds to download the model.
+
 ### Chunking Strategies
 
 - **SEMANTIC**: Splits by Markdown headers, preserves structure, max 1000 tokens per section
@@ -279,6 +361,14 @@ curl -X DELETE http://localhost:8082/api/rag/documents/test.md
 | `GPUSTACK_API_URL` | (optional) | URL GPUStack API |
 | `HUGGINGFACE_API_URL` | (optional) | URL HuggingFace API |
 | `HUGGINGFACE_TOKEN` | (optional) | Токен HuggingFace |
+| `TEI_RERANKER_URL` | `http://tei-reranker:80` | URL TEI reranker service |
+| `RAG_RERANK_ENABLED` | `false` | Enable RAG reranking |
+| `RAG_RERANK_TOP_K_BEFORE` | `20` | Documents to fetch before reranking |
+| `RAG_RERANK_TOP_K_AFTER` | `10` | Documents to return after reranking |
+| `RAG_RERANK_THRESHOLD` | `0.5` | Reranking score threshold |
+| `RAG_QUERY_REWRITE_ENABLED` | `true` | Enable query rewriting |
+| `RAG_QUERY_REWRITE_MODEL` | `default-chat` | Model for query rewriting |
+| `RAG_QUERY_REWRITE_TIMEOUT` | `2` | Query rewrite timeout (seconds) |
 
 ## Структура проекта
 
@@ -343,6 +433,37 @@ docker-compose -f docker-compose-8081.yml config | grep SERVER_PORT
 
 ### Frontend не подключается к backend
 Проверьте nginx конфигурацию в `ai-chat-frontend/nginx.conf`
+
+### Reranking не работает
+
+1. **Проверьте TEI контейнер:**
+   ```bash
+   docker ps | grep tei-reranker
+   docker logs tei-reranker --tail 20
+   ```
+
+2. **Проверьте health endpoint:**
+   ```bash
+   curl http://localhost:8082/api/rag/health
+   ```
+   Ожидается: `{"rerankerStatus":"UP","message":"TEI reranker service is healthy"}`
+
+3. **Проверьте переменную окружения:**
+   ```bash
+   docker-compose config | grep TEI_RERANKER_URL
+   ```
+   Ожидается: `TEI_RERANKER_URL=http://tei-reranker:80`
+
+4. **Подождите загрузки модели:**
+   При первом запуске TEI загружает модель (30-60 секунд). Проверьте логи:
+   ```bash
+   docker logs tei-reranker | grep "Ready"
+   ```
+
+5. **Проверьте логи backend:**
+   ```bash
+   docker logs ai-chat-backend | grep -E "Rerank|TEI"
+   ```
 
 ## Разработка
 

@@ -1,11 +1,18 @@
 package com.aichat.controller;
 
 import com.aichat.dto.IndexResult;
+import com.aichat.dto.RagContextResult;
 import com.aichat.dto.rag.SearchResponse;
 import com.aichat.dto.rag.SearchResult;
 import com.aichat.dto.rag.UploadResponse;
+import com.aichat.dto.rerank.RerankRequest;
+import com.aichat.dto.rerank.RerankResponse;
+import com.aichat.dto.rerank.RerankedDocument;
 import com.aichat.service.RagIndexingService;
+import com.aichat.service.RagSearchService;
 import com.aichat.service.chunking.ChunkingType;
+import com.aichat.service.query.QueryRewriteService;
+import com.aichat.service.rerank.RerankService;
 import com.aichat.service.storage.VectorStorageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -17,10 +24,16 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 
+import jakarta.annotation.PostConstruct;
+import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,12 +49,36 @@ import java.util.Map;
 public class RagController {
     private static final Logger logger = LoggerFactory.getLogger(RagController.class);
 
+    @Value("${rag.rerank.base-url:http://tei-reranker:80}")
+    private String rerankBaseUrl;
+
+    private WebClient webClient;
+
     private final RagIndexingService indexingService;
     private final VectorStorageService storageService;
+    private final RerankService rerankService;
+    private final QueryRewriteService queryRewriteService;
+    private final RagSearchService ragSearchService;
 
-    public RagController(RagIndexingService indexingService, VectorStorageService storageService) {
+    public RagController(RagIndexingService indexingService, VectorStorageService storageService,
+                        RerankService rerankService, QueryRewriteService queryRewriteService,
+                        RagSearchService ragSearchService) {
         this.indexingService = indexingService;
         this.storageService = storageService;
+        this.rerankService = rerankService;
+        this.queryRewriteService = queryRewriteService;
+        this.ragSearchService = ragSearchService;
+    }
+
+    @PostConstruct
+    public void init() {
+        HttpClient httpClient = HttpClient.create()
+                .responseTimeout(Duration.ofSeconds(1));
+
+        this.webClient = WebClient.builder()
+                .baseUrl(rerankBaseUrl)
+                .clientConnector(new org.springframework.http.client.reactive.ReactorClientHttpConnector(httpClient))
+                .build();
     }
 
     /**
@@ -279,6 +316,119 @@ public class RagController {
     }
 
     /**
+     * Enhanced RAG search with optional reranking and query rewriting.
+     * Supports advanced retrieval features for improved result quality.
+     * 
+     * Flow: rewrite query → embed → vector search (top 20) → rerank → filter by threshold → take top 5
+     * 
+     * @param query the search query
+     * @param topK number of results to return (default: 5)
+     * @param rerank whether to enable reranking (default: false)
+     * @param threshold reranking score threshold for filtering (default: 0.5)
+     * @param rewrite whether to enable query rewriting (default: false)
+     * @return RagContextResult with context, sources, rerankScores, and queryWasRewritten metadata
+     */
+    @GetMapping("/search/enhanced")
+    @Operation(
+        summary = "Enhanced RAG search with reranking and query rewriting",
+        description = "Advanced RAG search with optional reranking and query rewriting. " +
+            "Flow: rewrite query → embed → vector search (top 20) → rerank → filter by threshold → take top 5. " +
+            "Returns RagContextResult with rerankScores and queryWasRewritten metadata."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Enhanced search results with metadata",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RagContextResult.class),
+                examples = @ExampleObject(
+                    name = "Reranking enabled",
+                    summary = "Search with reranking",
+                    value = """
+                        {
+                          "context": "Use the following context from the knowledge base:\\n\\n...",
+                          "sources": [
+                            {
+                              "source": "ml.md",
+                              "title": "Machine Learning",
+                              "section": "Introduction",
+                              "similarity": 0.92
+                            }
+                          ],
+                          "rerankScores": [0.95, 0.87, 0.76],
+                          "queryWasRewritten": true
+                        }
+                        """
+                )
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Bad request - empty or missing query parameter",
+            content = @Content
+        ),
+        @ApiResponse(
+            responseCode = "500",
+            description = "Internal server error - embedding or reranking service unavailable",
+            content = @Content
+        )
+    })
+    public ResponseEntity<RagContextResult> enhancedSearch(
+            @Parameter(
+                description = "Search query text",
+                required = true,
+                example = "machine learning"
+            )
+            @RequestParam String query,
+            @Parameter(
+                description = "Number of results to return (default: 5)",
+                required = false,
+                example = "5"
+            )
+            @RequestParam(defaultValue = "5") int topK,
+            @Parameter(
+                description = "Enable reranking (default: false)",
+                required = false,
+                example = "true"
+            )
+            @RequestParam(defaultValue = "false") boolean rerank,
+            @Parameter(
+                description = "Reranking score threshold (default: 0.5)",
+                required = false,
+                example = "0.5"
+            )
+            @RequestParam(defaultValue = "0.5") double threshold,
+            @Parameter(
+                description = "Enable query rewriting (default: false)",
+                required = false,
+                example = "true"
+            )
+            @RequestParam(defaultValue = "false") boolean rewrite) {
+        
+        logger.info("Received enhanced search request: query='{}', topK={}, rerank={}, threshold={}, rewrite={}", 
+            query, topK, rerank, threshold, rewrite);
+
+        if (query == null || query.isBlank()) {
+            logger.warn("Enhanced search query is empty");
+            return ResponseEntity.badRequest().build();
+        }
+
+        try {
+            RagContextResult result = ragSearchService.searchAndAugment(query, topK, rerank, threshold, rewrite);
+            logger.debug("Enhanced search completed: results={}, rerankScores={}, queryWasRewritten={}", 
+                result.getSources().size(), 
+                result.getRerankScores() != null ? result.getRerankScores().size() : 0,
+                result.isQueryWasRewritten());
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            logger.error("Enhanced search failed for query '{}': {}", query, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
      * Delete a document and all associated chunks/vectors.
      * 
      * @param source the source identifier (file path or URL)
@@ -351,6 +501,71 @@ public class RagController {
         }
     }
     
+    /**
+     * Rewrite a search query to be more specific and detailed.
+     * Uses AI to enhance short queries (< 10 words) for better retrieval.
+     * Returns original query if it's already detailed or if rewrite fails.
+     * 
+     * @param queryRewriteRequest the query to rewrite
+     * @return rewritten query or original if skipped/failed
+     */
+    @PostMapping("/query/rewrite")
+    @Operation(
+        summary = "Rewrite search query",
+        description = "Rewrite a search query to be more specific and detailed using AI. " +
+            "Queries with >= 10 words are returned unchanged. Timeout: 2 seconds."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Query rewritten successfully or returned unchanged",
+            content = @Content(
+                mediaType = "application/json",
+                examples = @ExampleObject(
+                    name = "Success",
+                    summary = "Query rewritten",
+                    value = """
+                        {
+                          "originalQuery": "RAG pipeline",
+                          "rewrittenQuery": "How does the RAG (Retrieval-Augmented Generation) pipeline work?",
+                          "wasRewritten": true
+                        }
+                        """
+                )
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Bad request - empty or missing query",
+            content = @Content
+        )
+    })
+    public ResponseEntity<Map<String, Object>> rewriteQuery(
+            @RequestBody Map<String, String> queryRewriteRequest) {
+        
+        String query = queryRewriteRequest != null ? queryRewriteRequest.get("query") : null;
+        
+        if (query == null || query.isBlank()) {
+            logger.warn("Query rewrite request with empty query");
+            return ResponseEntity.badRequest().build();
+        }
+        
+        logger.info("Received query rewrite request: '{}'", query);
+        
+        String rewritten = queryRewriteService.rewrite(query);
+        boolean wasRewritten = !rewritten.equals(query);
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("originalQuery", query);
+        response.put("rewrittenQuery", rewritten);
+        response.put("wasRewritten", wasRewritten);
+        
+        logger.info("Query rewrite result: original='{}', rewritten='{}', wasRewritten={}", 
+            query, rewritten, wasRewritten);
+        
+        return ResponseEntity.ok(response);
+    }
+
     /**
      * Get statistics about the RAG index.
      * Returns document count, chunk count, average chunks per document, and index size.
@@ -445,5 +660,166 @@ public class RagController {
         } else {
             return String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
         }
+    }
+
+    /**
+     * Health check endpoint for RAG services.
+     * Returns the status of the TEI reranker service.
+     * 
+     * @return health status with rerankerStatus (UP/DOWN) and message
+     */
+    @GetMapping("/health")
+    @Operation(
+        summary = "RAG health check",
+        description = "Check the health status of RAG services, particularly the TEI reranker."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Health check completed successfully",
+            content = @Content(
+                mediaType = "application/json",
+                examples = {
+                    @ExampleObject(
+                        name = "Reranker UP",
+                        summary = "TEI reranker is available",
+                        value = """
+                            {
+                              "rerankerStatus": "UP",
+                              "message": "TEI reranker service is healthy"
+                            }
+                            """
+                    ),
+                    @ExampleObject(
+                        name = "Reranker DOWN",
+                        summary = "TEI reranker is unavailable",
+                        value = """
+                            {
+                              "rerankerStatus": "DOWN",
+                              "message": "TEI reranker service is unavailable"
+                            }
+                            """
+                    )
+                }
+            )
+        )
+    })
+    public ResponseEntity<Map<String, Object>> healthCheck() {
+        logger.debug("Health check requested");
+        
+        Map<String, Object> health = new HashMap<>();
+        
+        try {
+            RerankRequest request = new RerankRequest("health", Collections.singletonList("test"), 1);
+            
+            @SuppressWarnings("unchecked")
+            List<RerankResponse.RerankResult> results = webClient.post()
+                    .uri("/rerank")
+                    .bodyValue(request)
+                    .retrieve()
+                    .bodyToMono(List.class)
+                    .timeout(Duration.ofSeconds(1))
+                    .cast(List.class)
+                    .block();
+            
+            if (results != null && !results.isEmpty()) {
+                health.put("rerankerStatus", "UP");
+                health.put("message", "TEI reranker service is healthy");
+                logger.debug("Health check: reranker UP - {} results", results.size());
+            } else {
+                health.put("rerankerStatus", "DOWN");
+                health.put("message", "TEI reranker service returned empty response");
+                logger.debug("Health check: reranker DOWN (empty response)");
+            }
+            
+        } catch (Exception e) {
+            health.put("rerankerStatus", "DOWN");
+            health.put("message", "TEI reranker service is unavailable");
+            logger.debug("Health check: reranker DOWN - {}", e.getMessage());
+        }
+        
+        return ResponseEntity.ok(health);
+    }
+
+    /**
+     * Test endpoint for reranking functionality.
+     * Used for QA scenarios to verify RerankService behavior.
+     * 
+     * @param request rerank request with query, documents, and topN
+     * @return list of reranked documents
+     */
+    @PostMapping("/rerank/test")
+    @Operation(
+        summary = "Test reranking endpoint",
+        description = "Test endpoint for QA scenarios. Reranks a list of documents based on query relevance."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Reranking completed successfully",
+            content = @Content(
+                mediaType = "application/json",
+                examples = @ExampleObject(
+                    name = "Success",
+                    summary = "Reranked documents",
+                    value = """
+                        [
+                          {
+                            "text": "Machine learning is a subset of AI",
+                            "score": 0.95,
+                            "originalIndex": 0
+                          },
+                          {
+                            "text": "Weather forecast for today",
+                            "score": 0.12,
+                            "originalIndex": 1
+                          }
+                        ]
+                        """
+                )
+            )
+        ),
+        @ApiResponse(
+            responseCode = "200",
+            description = "Baseline results on TEI failure or timeout",
+            content = @Content(
+                mediaType = "application/json",
+                examples = @ExampleObject(
+                    name = "Baseline results",
+                    summary = "TEI unavailable, returning original documents",
+                    value = """
+                        [
+                          {
+                            "text": "Machine learning is a subset of AI",
+                            "score": 0.0,
+                            "originalIndex": 0
+                          },
+                          {
+                            "text": "Weather forecast for today",
+                            "score": 0.0,
+                            "originalIndex": 1
+                          }
+                        ]
+                        """
+                )
+            )
+        )
+    })
+    public ResponseEntity<List<RerankedDocument>> testRerank(
+            @RequestBody Map<String, Object> request) {
+        
+        String query = (String) request.get("query");
+        List<String> documents = (List<String>) request.get("documents");
+        Integer topN = (Integer) request.get("topN");
+
+        logger.info("Test rerank endpoint called: query='{}', documents={}, topN={}", 
+            query, documents != null ? documents.size() : 0, topN);
+
+        if (topN == null) {
+            topN = 10;
+        }
+
+        List<RerankedDocument> results = rerankService.rerank(query, documents, topN);
+        return ResponseEntity.ok(results);
     }
 }

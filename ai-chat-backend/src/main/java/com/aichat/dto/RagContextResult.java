@@ -9,6 +9,8 @@ import java.util.List;
 public class RagContextResult {
     private String context;
     private List<SourceInfo> sources;
+    private List<Double> rerankScores;
+    private boolean queryWasRewritten;
     
     public RagContextResult() {
     }
@@ -16,6 +18,14 @@ public class RagContextResult {
     public RagContextResult(String context, List<SourceInfo> sources) {
         this.context = context;
         this.sources = sources;
+        this.queryWasRewritten = false;
+    }
+    
+    public RagContextResult(String context, List<SourceInfo> sources, List<Double> rerankScores, boolean queryWasRewritten) {
+        this.context = context;
+        this.sources = sources;
+        this.rerankScores = rerankScores;
+        this.queryWasRewritten = queryWasRewritten;
     }
     
     public String getContext() {
@@ -32,5 +42,21 @@ public class RagContextResult {
     
     public void setSources(List<SourceInfo> sources) {
         this.sources = sources;
+    }
+    
+    public List<Double> getRerankScores() {
+        return rerankScores;
+    }
+    
+    public void setRerankScores(List<Double> rerankScores) {
+        this.rerankScores = rerankScores;
+    }
+    
+    public boolean isQueryWasRewritten() {
+        return queryWasRewritten;
+    }
+    
+    public void setQueryWasRewritten(boolean queryWasRewritten) {
+        this.queryWasRewritten = queryWasRewritten;
     }
 }

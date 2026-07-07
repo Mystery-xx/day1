@@ -352,6 +352,73 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
               When enabled, the chat will search your uploaded documents and use them as context for better answers.
             </div>
           </div>
+          
+          <div className="setting-item" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e0e0e0' }}>
+            <div className="setting-toggle-container">
+              <label htmlFor="useRerank">Enable Reranking</label>
+              <input
+                id="useRerank"
+                type="checkbox"
+                className="toggle-switch"
+                checked={settings.useRerank || false}
+                onChange={(e) => handleChange('useRerank', e.target.checked)}
+                disabled={!settings.useRag}
+              />
+            </div>
+            <div className="setting-description">
+              When enabled (requires RAG), documents are reranked by relevance using TEI reranker. Improves result quality but adds latency.
+            </div>
+            {!settings.useRag && (
+              <div className="setting-description" style={{ color: '#ff9800', fontSize: '12px', marginTop: '4px' }}>
+                ⚠️ Enable RAG first to use reranking
+              </div>
+            )}
+          </div>
+          
+          <div className="setting-item" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e0e0e0' }}>
+            <label htmlFor="ragThreshold">Rerank Threshold: {(settings.ragThreshold || 0.0).toFixed(1)}</label>
+            <input
+              id="ragThreshold"
+              type="range"
+              min="-2"
+              max="5"
+              step="0.1"
+              value={settings.ragThreshold || 0.0}
+              onChange={(e) => handleChange('ragThreshold', parseFloat(e.target.value))}
+              disabled={!settings.useRerank}
+              style={{ width: '100%', marginTop: '8px' }}
+            />
+            <div className="setting-description">
+              Minimum score for documents to be included. Lower = more documents, higher = stricter quality. TEI uses logits (0.0 = 50% probability).
+            </div>
+            {!settings.useRerank && (
+              <div className="setting-description" style={{ color: '#ff9800', fontSize: '12px', marginTop: '4px' }}>
+                ⚠️ Enable reranking to adjust threshold
+              </div>
+            )}
+          </div>
+          
+          <div className="setting-item" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e0e0e0' }}>
+            <div className="setting-toggle-container">
+              <label htmlFor="useRewrite">Enable Query Rewrite</label>
+              <input
+                id="useRewrite"
+                type="checkbox"
+                className="toggle-switch"
+                checked={settings.useRewrite || false}
+                onChange={(e) => handleChange('useRewrite', e.target.checked)}
+                disabled={!settings.useRag}
+              />
+            </div>
+            <div className="setting-description">
+              When enabled (requires RAG), short queries are automatically rewritten to be more specific and detailed before search. Improves retrieval accuracy but adds latency.
+            </div>
+            {!settings.useRag && (
+              <div className="setting-description" style={{ color: '#ff9800', fontSize: '12px', marginTop: '4px' }}>
+                ⚠️ Enable RAG first to use query rewrite
+              </div>
+            )}
+          </div>
           </>
         )}
         

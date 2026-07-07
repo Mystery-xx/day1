@@ -39,6 +39,22 @@ services:
       - ai-chat-network
     restart: unless-stopped
 
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: tei-reranker
+    ports:
+      - "8099:80"
+    volumes:
+      - ./models:/data
+    command: --model-id BAAI/bge-reranker-v2-m3
+    networks:
+      - ai-chat-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 9G
+
 networks:
   ai-chat-network:
     driver: bridge

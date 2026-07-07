@@ -77,15 +77,39 @@ public class AiChatService {
         
         // RAG integration: if useRag is enabled, search and augment with context
         if (Boolean.TRUE.equals(request.getUseRag())) {
-            logger.info("RAG enabled: query={}, topK=5", request.getMessage());
-            ragResult = ragSearchService.searchAndAugment(request.getMessage(), 5);
+            boolean rerankEnabled = Boolean.TRUE.equals(request.getUseRerank());
+            boolean rewriteEnabled = Boolean.TRUE.equals(request.getUseRewrite());
+            double threshold = request.getRagThreshold() != null ? request.getRagThreshold() : 0.0;
+            logger.info("RAG enabled: query={}, topK=5, rerank={}, rewrite={}, threshold={}", request.getMessage(), rerankEnabled, rewriteEnabled, threshold);
+            // Use enhanced search with reranking and query rewrite support
+            ragResult = ragSearchService.searchAndAugment(request.getMessage(), 5, rerankEnabled, threshold, rewriteEnabled);
             
-            // Build messages with RAG context as system message
+            // Build messages with RAG context as system message + conversation history
             List<ChatMessageDTO> messages = new ArrayList<>();
-            ChatMessageDTO systemMessage = new ChatMessageDTO();
-            systemMessage.setRole("system");
-            systemMessage.setContent(ragResult.getContext());
-            messages.add(systemMessage);
+            
+            // 1. Add RAG context as system message
+            ChatMessageDTO ragSystemMessage = new ChatMessageDTO();
+            ragSystemMessage.setRole("system");
+            ragSystemMessage.setContent(ragResult.getContext());
+            messages.add(ragSystemMessage);
+            
+            // 2. Add conversation history (if sessionId provided and sendHistory is true)
+            if (request.getSessionId() != null && !request.getSessionId().isEmpty() && shouldSendHistory(request.getSettings())) {
+                ContextStrategyType strategyType = ContextStrategyType.fromString(
+                        request.getSettings() != null ? request.getSettings().getContextStrategy() : null);
+                ContextStrategy strategy = contextStrategyFactory.createStrategy(strategyType);
+                List<ChatMessageDTO> history = strategy.buildContext(request.getSessionId(), request.getSettings());
+                
+                // Skip system messages from history (to avoid duplicate system messages)
+                for (ChatMessageDTO msg : history) {
+                    if (!"system".equals(msg.getRole())) {
+                        messages.add(msg);
+                    }
+                }
+                logger.debug("Added {} history messages to RAG request", history.size());
+            }
+            
+            // 3. Add current user message
             ChatMessageDTO userMessage = new ChatMessageDTO();
             userMessage.setRole("user");
             userMessage.setContent(request.getMessage());

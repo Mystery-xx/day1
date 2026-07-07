@@ -36,7 +36,10 @@ function App() {
       contextStrategy: 'summary',
       contextWindowSize: 10,
       stickyFacts: {},
-      useRag: false
+      useRag: false,
+      useRerank: false,
+      useRewrite: false,
+      ragThreshold: 0.0
     }
     if (saved) {
       try {
@@ -172,6 +175,9 @@ function App() {
         sessionId: sessionId,
         message: userMessage.content,
         useRag: settings.useRag || false,
+        useRerank: settings.useRerank || false,
+        useRewrite: settings.useRewrite || false,
+        ragThreshold: settings.ragThreshold || 0.0,
         settings: {
           ...settingsWithoutStop,
           // Only include stop if it has values
@@ -271,16 +277,15 @@ function App() {
               
               if (response.error) {
                 setMessages(prev => [...prev, { role: 'system', content: `Error: ${response.error}` }])
-              } else if (response.content) {
+              } else {
+                // Show assistant response even if content is empty (sources may still be available)
                 setMessages(prev => [...prev, { 
                   role: 'assistant', 
-                  content: response.content,
-                  sources: response.debugResponse?.sources || []
+                  content: response.content || '(No answer generated, but sources are available below)',
+                  sources: response.sources || []
                 }])
                 refresh()
                 fetchSessions()  // Update session list with new message count/timestamps
-              } else {
-                console.warn('No content in response:', response)
               }
             }
           }

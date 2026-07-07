@@ -7,6 +7,9 @@ public class ChatRequest {
     private String sessionId;
     private String message;
     private Boolean useRag = false;
+    private Boolean useRerank = false;
+    private Boolean useRewrite = false;
+    private Double ragThreshold = 0.0;
     private List<Message> history;
     private ModelSettings settings;
 
@@ -60,6 +63,30 @@ public class ChatRequest {
 
     public void setUseRag(Boolean useRag) {
         this.useRag = useRag;
+    }
+
+    public Boolean getUseRerank() {
+        return useRerank;
+    }
+
+    public void setUseRerank(Boolean useRerank) {
+        this.useRerank = useRerank;
+    }
+
+    public Double getRagThreshold() {
+        return ragThreshold;
+    }
+
+    public void setRagThreshold(Double ragThreshold) {
+        this.ragThreshold = ragThreshold;
+    }
+
+    public Boolean getUseRewrite() {
+        return useRewrite;
+    }
+
+    public void setUseRewrite(Boolean useRewrite) {
+        this.useRewrite = useRewrite;
     }
 
     public List<Message> getHistory() {

@@ -65,6 +65,19 @@ spring.ai:
   retry:
     enabled: false
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env,configprops
+  endpoint:
+    health:
+      show-details: always
+    env:
+      show-values: always
+    configprops:
+      show-values: always
+
 rag:
   chunking:
     strategy: SEMANTIC
@@ -79,3 +92,13 @@ rag:
       ef-search: 50
   ollama:
     base-url: ${OLLAMA_BASE_URL:http://host.docker.internal:11434}
+  query-rewrite:
+    enabled: ${RAG_QUERY_REWRITE_ENABLED:true}
+    model: ${RAG_QUERY_REWRITE_MODEL:default-chat}
+    timeout-seconds: ${RAG_QUERY_REWRITE_TIMEOUT:2}
+  rerank:
+    enabled: ${RAG_RERANK_ENABLED:false}
+    base-url: ${TEI_RERANKER_URL:http://tei-reranker:80}
+    top-k-before: ${RAG_RERANK_TOP_K_BEFORE:20}
+    top-k-after: ${RAG_RERANK_TOP_K_AFTER:10}
+    threshold: ${RAG_RERANK_THRESHOLD:0.0}
