@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 function SearchPanel() {
   const [query, setQuery] = useState('')
@@ -8,6 +8,15 @@ function SearchPanel() {
   const [error, setError] = useState(null)
   const [hoveredChunk, setHoveredChunk] = useState(null)
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
+  const [rerankEnabled, setRerankEnabled] = useState(() => {
+    const saved = localStorage.getItem('rag-rerank-enabled')
+    return saved !== null ? JSON.parse(saved) : true
+  })
+  const [rerankTooltipVisible, setRerankTooltipVisible] = useState(false)
+
+  useEffect(() => {
+    localStorage.setItem('rag-rerank-enabled', JSON.stringify(rerankEnabled))
+  }, [rerankEnabled])
 
   const handleSearch = async (e) => {
     e.preventDefault()
@@ -22,7 +31,7 @@ function SearchPanel() {
     setResults([])
 
     try {
-      const response = await fetch(`/api/rag/search?query=${encodeURIComponent(query)}&topK=10`)
+      const response = await fetch(`/api/rag/search/enhanced?query=${encodeURIComponent(query)}&topK=10&rerank=${rerankEnabled}&threshold=0.5&rewrite=false`)
       
       if (!response.ok) {
         throw new Error(`Search failed with status ${response.status}`)
@@ -77,6 +86,66 @@ function SearchPanel() {
       </div>
 
       <div className="search-content">
+        {/* Rerank Toggle */}
+        <div style={{
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '14px',
+            color: '#333',
+            cursor: 'pointer',
+            position: 'relative'
+          }}>
+            <input
+              type="checkbox"
+              checked={rerankEnabled}
+              onChange={(e) => setRerankEnabled(e.target.checked)}
+              style={{
+                width: '18px',
+                height: '18px',
+                cursor: 'pointer',
+                accentColor: '#2196F3'
+              }}
+            />
+            <span
+              onMouseEnter={() => setRerankTooltipVisible(true)}
+              onMouseLeave={() => setRerankTooltipVisible(false)}
+              style={{
+                position: 'relative',
+                display: 'inline-block'
+              }}
+            >
+              Enable reranking
+              {rerankTooltipVisible && (
+                <div style={{
+                  position: 'absolute',
+                  left: '0',
+                  top: '100%',
+                  marginTop: '4px',
+                  padding: '8px 12px',
+                  background: 'rgba(0, 0, 0, 0.9)',
+                  color: 'white',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  lineHeight: '1.4',
+                  maxWidth: '280px',
+                  zIndex: 1000,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  whiteSpace: 'normal'
+                }}>
+                  Reranking improves result relevance using AI cross-encoder
+                </div>
+              )}
+            </span>
+          </label>
+        </div>
+
         {/* Search Form */}
         <form onSubmit={handleSearch} className="search-form">
           <div className="search-input-group">
@@ -207,7 +276,7 @@ function SearchPanel() {
               {/* Table Header */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '2fr 1fr 80px 80px 80px 100px 3fr',
+                gridTemplateColumns: '2fr 1fr 80px 80px 80px 100px 100px 3fr',
                 gap: '1px',
                 background: '#e0e0e0',
                 padding: '12px',
@@ -222,6 +291,7 @@ function SearchPanel() {
                 <div>Start</div>
                 <div>End</div>
                 <div>Similarity</div>
+                <div>Rerank Score</div>
                 <div>Content Preview</div>
               </div>
 
@@ -238,7 +308,7 @@ function SearchPanel() {
                     className="result-row"
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '2fr 1fr 80px 80px 80px 100px 3fr',
+                      gridTemplateColumns: '2fr 1fr 80px 80px 80px 100px 100px 3fr',
                       gap: '1px',
                       background: '#fff',
                       padding: '12px',
@@ -289,6 +359,17 @@ function SearchPanel() {
                       textAlign: 'center'
                     }}>
                       {formatSimilarity(result.similarity)}
+                    </div>
+                    <div style={{
+                      fontWeight: '600',
+                      color: result.rerankScore !== undefined && result.rerankScore !== null 
+                        ? (result.rerankScore > 0.7 ? '#4CAF50' : result.rerankScore > 0.4 ? '#ff9800' : '#f44336')
+                        : '#999',
+                      textAlign: 'center'
+                    }}>
+                      {result.rerankScore !== undefined && result.rerankScore !== null 
+                        ? formatSimilarity(result.rerankScore)
+                        : '—'}
                     </div>
                     <div
                       onMouseEnter={(e) => handleMouseEnter(e, result.content || result.chunk || '')}

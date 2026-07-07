@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import './SourceCitation.css';
 
 function SourceCitation({ sources }) {
   const [expanded, setExpanded] = useState(false);
@@ -15,7 +16,7 @@ function SourceCitation({ sources }) {
         onClick={() => setExpanded(!expanded)}
         style={{ cursor: 'pointer', color: '#666', fontSize: '12px' }}
       >
-        📚 Sources: {sources.map(s => s.source).join(', ')}
+        📚 Sources: {sources.map(s => s.title || s.source).join(', ')}
         {expanded ? ' ▲' : ' ▼'}
       </div>
       
@@ -23,11 +24,10 @@ function SourceCitation({ sources }) {
         <div className="source-details">
           {sources.map((source, idx) => (
             <div key={idx} className="source-item">
-              <strong>{source.source}</strong>
-              {source.title && <div>Title: {source.title}</div>}
-              {source.section && <div>Section: {source.section}</div>}
+              <strong>{source.title || source.source}</strong>
+              {source.section && <div className="section">Section: {source.section}</div>}
               {source.similarity !== undefined && (
-                <div>Similarity: {(source.similarity * 100).toFixed(1)}%</div>
+                <div className="similarity">Relevance: {(source.similarity * 100).toFixed(1)}%</div>
               )}
             </div>
           ))}
