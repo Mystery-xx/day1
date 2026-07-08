@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -65,7 +66,7 @@ public class TaskStateExtractionStrategy {
         private String goal;
         private TaskStatus status;
         private List<ConstraintDTO> constraints;
-        private List<String> clarifications;
+        private List<ClarificationDTO> clarifications;
 
         public ExtractionResult() {
             this.constraints = new ArrayList<>();
@@ -96,11 +97,11 @@ public class TaskStateExtractionStrategy {
             this.constraints = constraints;
         }
 
-        public List<String> getClarifications() {
+        public List<ClarificationDTO> getClarifications() {
             return clarifications;
         }
 
-        public void setClarifications(List<String> clarifications) {
+        public void setClarifications(List<ClarificationDTO> clarifications) {
             this.clarifications = clarifications;
         }
     }
@@ -119,8 +120,8 @@ public class TaskStateExtractionStrategy {
 
         ExtractionResult result = new ExtractionResult();
 
-        // 1. Извлекаем goal из первого сообщения пользователя
-        result.setGoal(extractGoal(conversationHistory));
+        // 1. Извлекаем goal из первого сообщения пользователя или currentMessage
+        result.setGoal(extractGoal(conversationHistory, currentMessage));
 
         // 2. Определяем статус по последнему сообщению AI
         result.setStatus(determineStatus(conversationHistory, currentMessage));
@@ -139,29 +140,33 @@ public class TaskStateExtractionStrategy {
     }
 
     /**
-     * Извлекает цель задачи из первого сообщения пользователя.
+     * Извлекает цель задачи из первого сообщения пользователя или currentMessage.
      */
-    private String extractGoal(String conversationHistory) {
-        if (conversationHistory == null || conversationHistory.trim().isEmpty()) {
-            return "";
-        }
-
-        // Разбиваем историю на сообщения
-        String[] lines = conversationHistory.split("\n");
-        for (String line : lines) {
-            // Ищем первое сообщение пользователя
-            if (line.trim().startsWith("User:") || line.trim().startsWith("Пользователь:")) {
-                String message = line.replaceFirst("^(User:|Пользователь:)", "").trim();
-                if (!message.isEmpty()) {
-                    // Очищаем сообщение от лишних слов, оставляем суть
-                    String goal = normalizeGoal(message);
-                    logger.debug("Extracted goal from first user message: '{}'", goal);
-                    return goal;
+    private String extractGoal(String conversationHistory, String currentMessage) {
+        // Сначала пробуем извлечь из conversation history
+        if (conversationHistory != null && !conversationHistory.trim().isEmpty()) {
+            String[] lines = conversationHistory.split("\n");
+            for (String line : lines) {
+                // Ищем первое сообщение пользователя
+                if (line.trim().startsWith("User:") || line.trim().startsWith("Пользователь:")) {
+                    String message = line.replaceFirst("^(User:|Пользователь:)", "").trim();
+                    if (!message.isEmpty()) {
+                        String goal = normalizeGoal(message);
+                        logger.debug("Extracted goal from first user message: '{}'", goal);
+                        return goal;
+                    }
                 }
             }
         }
 
-        logger.debug("No user goal found in conversation history");
+        // Если история пуста или не содержит сообщения пользователя, используем currentMessage
+        if (currentMessage != null && !currentMessage.trim().isEmpty()) {
+            String goal = normalizeGoal(currentMessage);
+            logger.debug("Extracted goal from currentMessage: '{}'", goal);
+            return goal;
+        }
+
+        logger.debug("No user goal found in conversation history or currentMessage");
         return "";
     }
 
@@ -286,14 +291,17 @@ public class TaskStateExtractionStrategy {
     private List<ConstraintDTO> extractConstraints(String conversationHistory, String currentMessage) {
         List<ConstraintDTO> constraints = new ArrayList<>();
 
+        // Извлекаем goal для последующей проверки на дубликаты
+        String goal = extractGoal(conversationHistory, currentMessage);
+
         // Сначала извлекаем из conversation history
         if (conversationHistory != null && !conversationHistory.trim().isEmpty()) {
-            constraints.addAll(extractConstraintsFromText(conversationHistory));
+            constraints.addAll(extractConstraintsFromText(conversationHistory, goal));
         }
 
         // Затем извлекаем из currentMessage (если есть)
         if (currentMessage != null && !currentMessage.trim().isEmpty()) {
-            constraints.addAll(extractConstraintsFromText(currentMessage));
+            constraints.addAll(extractConstraintsFromText(currentMessage, goal));
         }
 
         return constraints;
@@ -302,7 +310,7 @@ public class TaskStateExtractionStrategy {
     /**
      * Извлекает ограничения из текста (сообщения пользователя).
      */
-    private List<ConstraintDTO> extractConstraintsFromText(String text) {
+    private List<ConstraintDTO> extractConstraintsFromText(String text, String goal) {
         List<ConstraintDTO> constraints = new ArrayList<>();
 
         if (text == null || text.trim().isEmpty()) {
@@ -316,11 +324,11 @@ public class TaskStateExtractionStrategy {
             // Проверяем сообщения пользователя с префиксом или без
             if (message.startsWith("User:") || message.startsWith("Пользователь:")) {
                 message = message.replaceFirst("^(User:|Пользователь:)", "").trim();
-                constraints.addAll(extractConstraintsFromMessage(message));
+                constraints.addAll(extractConstraintsFromMessage(message, goal));
             }
             // Если нет префикса - считаем что это чистое сообщение пользователя
             else if (!message.isEmpty() && !message.startsWith("AI:") && !message.startsWith("Assistant:")) {
-                constraints.addAll(extractConstraintsFromMessage(message));
+                constraints.addAll(extractConstraintsFromMessage(message, goal));
             }
         }
 
@@ -330,7 +338,7 @@ public class TaskStateExtractionStrategy {
     /**
      * Извлекает ограничения из одного сообщения.
      */
-    private List<ConstraintDTO> extractConstraintsFromMessage(String message) {
+    private List<ConstraintDTO> extractConstraintsFromMessage(String message, String goal) {
         List<ConstraintDTO> constraints = new ArrayList<>();
 
         if (message == null || message.trim().isEmpty()) {
@@ -343,7 +351,6 @@ public class TaskStateExtractionStrategy {
         // "не используй X" - извлекаем всю фразу
         Matcher notUseMatcher = CONSTRAINT_NOT_USE.matcher(message);
         while (notUseMatcher.find()) {
-            // Извлекаем полное предложение или до точки/запятой
             String constraint = extractFullConstraintPhrase(message, notUseMatcher.start());
             if (!constraint.isEmpty() && !foundConstraints.contains(constraint)) {
                 foundConstraints.add(constraint);
@@ -368,8 +375,14 @@ public class TaskStateExtractionStrategy {
             }
         }
 
-        // Добавляем найденные ограничения
+        // Добавляем найденные ограничения, исключая те что являются подстрокой goal
         for (String constraintText : foundConstraints) {
+            // Пропускаем ограничение если оно содержится в goal (чтобы избежать дублирования)
+            if (goal != null && !goal.isEmpty() && goal.toLowerCase().contains(constraintText.toLowerCase())) {
+                logger.debug("Skipping constraint '{}' as it is part of goal '{}'", constraintText, goal);
+                continue;
+            }
+            
             ConstraintDTO constraint = new ConstraintDTO();
             constraint.setType(determineConstraintType(constraintText));
             constraint.setDescription(constraintText);
@@ -439,17 +452,17 @@ public class TaskStateExtractionStrategy {
     }
 
     /**
-     * Извлекает clarifications - ответы пользователя на вопросы AI.
+     * Извлекает clarifications - пары вопрос-ответ из диалога.
      */
-    private List<String> extractClarifications(String conversationHistory) {
-        List<String> clarifications = new ArrayList<>();
+    private List<ClarificationDTO> extractClarifications(String conversationHistory) {
+        List<ClarificationDTO> clarifications = new ArrayList<>();
 
         if (conversationHistory == null || conversationHistory.trim().isEmpty()) {
             return clarifications;
         }
 
         String[] lines = conversationHistory.split("\n");
-        boolean aiAskedQuestion = false;
+        String lastAiQuestion = null;
 
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i].trim();
@@ -459,23 +472,24 @@ public class TaskStateExtractionStrategy {
                 String aiMessage = line.replaceFirst("^(AI:|Assistant:)", "").trim();
                 // Если сообщение содержит "?", AI задал вопрос
                 if (aiMessage.contains("?")) {
-                    aiAskedQuestion = true;
+                    lastAiQuestion = aiMessage;
                     logger.debug("AI asked question at line {}: '{}'", i,
                             aiMessage.substring(0, Math.min(50, aiMessage.length())));
                 }
             }
             // Если AI задал вопрос, следующее сообщение пользователя - ответ
-            else if (aiAskedQuestion && (line.startsWith("User:") || line.startsWith("Пользователь:"))) {
+            else if (lastAiQuestion != null && (line.startsWith("User:") || line.startsWith("Пользователь:"))) {
                 String userMessage = line.replaceFirst("^(User:|Пользователь:)", "").trim();
                 if (!userMessage.isEmpty()) {
-                    clarifications.add(userMessage);
-                    logger.debug("Extracted clarification: '{}'", userMessage);
+                    ClarificationDTO clarification = new ClarificationDTO(lastAiQuestion, userMessage, Instant.now());
+                    clarifications.add(clarification);
+                    logger.debug("Extracted clarification Q&A: Q='{}' A='{}'", lastAiQuestion, userMessage);
                 }
-                aiAskedQuestion = false;
+                lastAiQuestion = null;
             }
-            // Если сообщение не от пользователя, сбрасываем флаг
+            // Если сообщение не от пользователя и не AI с вопросом, сбрасываем
             else if (!line.isEmpty() && !line.startsWith("User:") && !line.startsWith("Пользователь:")) {
-                aiAskedQuestion = false;
+                lastAiQuestion = null;
             }
         }
 
