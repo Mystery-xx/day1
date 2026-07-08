@@ -165,8 +165,9 @@ public class TaskStateExtractionStrategy {
                 .bodyToMono(String.class)
                 .block();
             
-            logger.debug("AI extraction response received");
-            return extractContentFromResponse(response);
+            String content = extractContentFromResponse(response);
+            logger.info("AI EXTRACTION RAW RESPONSE: {}", content);
+            return content;
             
         } catch (Exception e) {
             logger.error("AI extraction call failed", e);
@@ -179,32 +180,55 @@ public class TaskStateExtractionStrategy {
      */
     private String buildExtractionPrompt(String context) {
         return """
-            Analyze the conversation and extract the task state. Return ONLY valid JSON in this exact format:
+            Ты - экстрактор состояния задачи. Проанализируй диалог и верни ТОЛЬКО JSON.
             
+            ПРАВИЛА РАЗДЕЛЕНИЯ GOAL и CONSTRAINTS:
+            - GOAL: ЧТО пользователь хочет создать/построить/спроектировать (основная цель)
+            - CONSTRAINTS: КАК пользователь хочет это сделать (технические ограничения, "не используй", "только")
+            
+            ВАЖНО: НЕ включай ограничения в goal! Выноси их в отдельный массив constraints.
+            
+            Пример 1 (русский):
+            Пользователь: "Спроектируй микросервисную архитектуру для интернет-магазина. Не используй монолит, только Java и Spring Boot."
+            
+            Правильный ответ:
             {
-              "goal": "The main goal/task the user wants to accomplish",
-              "status": "CLARIFYING|PLANNING|EXECUTING|DONE",
+              "goal": "Спроектируй микросервисную архитектуру для интернет-магазина",
+              "status": "CLARIFYING",
               "constraints": [
-                {"type": "TECHNICAL", "description": "constraint description", "isViolated": false}
+                {"type": "TECHNICAL", "description": "Не используй монолит", "isViolated": false},
+                {"type": "TECHNICAL", "description": "Только Java и Spring Boot", "isViolated": false}
               ],
-              "clarifications": [
-                {"question": "question asked by AI", "answer": "user's answer", "timestamp": "ISO-8601"}
-              ]
+              "clarifications": []
+            }
+            
+            Пример 2 (английский):
+            User: "Create a React component for login. Don't use TypeScript, only use PostgreSQL."
+            
+            Correct answer:
+            {
+              "goal": "Create a React component for login",
+              "status": "CLARIFYING", 
+              "constraints": [
+                {"type": "TECHNICAL", "description": "Don't use TypeScript", "isViolated": false},
+                {"type": "TECHNICAL", "description": "Only use PostgreSQL", "isViolated": false}
+              ],
+              "clarifications": []
             }
             
             Status definitions:
-            - CLARIFYING: AI is asking questions to understand requirements
-            - PLANNING: AI is proposing architecture, plan, or structure
-            - EXECUTING: AI is writing code, creating files, implementing
-            - DONE: Task is complete, all tests passing
+            - CLARIFYING: AI задаёт вопросы для уточнения требований
+            - PLANNING: AI предлагает архитектуру, план, структуру
+            - EXECUTING: AI пишет код, создаёт файлы, реализует
+            - DONE: Задача завершена, все тесты проходят
             
-            Constraints are technical limitations mentioned by user (e.g., "don't use monolith", "only use React").
-            Clarifications are Q&A pairs where AI asked a question and user answered.
+            Constraints - это технические ограничения: "не используй X", "только Y", "без Z".
+            Clarifications - пары вопрос-ответ где AI задал вопрос, пользователь ответил.
             
-            Conversation to analyze:
+            Диалог для анализа:
             %s
             
-            Return ONLY JSON, no markdown, no explanations.
+            Верни ТОЛЬКО JSON, без markdown, без объяснений.
             """.formatted(context);
     }
 
@@ -229,21 +253,89 @@ public class TaskStateExtractionStrategy {
      */
     private String extractContentFromResponse(String response) {
         try {
+            logger.debug("RAW AI RESPONSE: {}", response);
             JsonNode root = objectMapper.readTree(response);
             JsonNode choices = root.get("choices");
             if (choices != null && choices.isArray() && choices.size() > 0) {
                 JsonNode message = choices.get(0).get("message");
                 if (message != null) {
-                    String content = message.get("content").asText();
-                    // Удаляем markdown code blocks если есть
-                    content = content.replaceAll("```json\\s*", "").replaceAll("```\\s*", "").trim();
-                    return content;
+                    JsonNode contentNode = message.get("content");
+                    JsonNode reasoningNode = message.get("reasoning");
+                    
+                    String content = null;
+                    
+                    // Сначала пробуем content
+                    if (contentNode != null && !contentNode.isNull()) {
+                        content = contentNode.asText();
+                        logger.debug("Using content field");
+                    }
+                    // Если content null (reasoning model), пробуем reasoning
+                    else if (reasoningNode != null && !reasoningNode.isNull()) {
+                        content = reasoningNode.asText();
+                        logger.debug("Using reasoning field (reasoning model)");
+                        // Извлекаем JSON из текста reasoning
+                        content = extractJsonFromText(content);
+                    }
+                    
+                    if (content != null) {
+                        logger.debug("AI CONTENT BEFORE CLEAN: {}", content);
+                        // Удаляем markdown code blocks если есть
+                        content = content.replaceAll("```json\\s*", "").replaceAll("```\\s*", "").trim();
+                        logger.debug("AI CONTENT AFTER CLEAN: {}", content);
+                        return content;
+                    }
                 }
             }
+            logger.error("Invalid AI response format - no choices or message");
             throw new RuntimeException("Invalid AI response format");
         } catch (JsonProcessingException e) {
+            logger.error("Failed to parse AI response JSON", e);
             throw new RuntimeException("Failed to parse AI response", e);
         }
+    }
+    
+    /**
+     * Извлекает JSON объект из текста (ищет JSON с полем "goal").
+     */
+    private String extractJsonFromText(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        
+        // Ищем JSON который начинается с {"goal": или {"status":
+        int start = text.indexOf("{\"goal\":");
+        if (start == -1) {
+            start = text.indexOf("{\"status\":");
+        }
+        if (start == -1) {
+            // Fallback: ищем первую '{'
+            start = text.indexOf('{');
+        }
+        
+        if (start == -1) {
+            return text;
+        }
+        
+        // Считаем скобки чтобы найти правильный конец
+        int braceCount = 0;
+        int end = start;
+        
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '{') {
+                braceCount++;
+            } else if (c == '}') {
+                braceCount--;
+                if (braceCount == 0) {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        
+        String json = text.substring(start, end + 1);
+        logger.debug("Extracted JSON from text (length={}): {}...", json.length(), json.substring(0, Math.min(80, json.length())));
+        return json;
     }
 
     /**
@@ -251,6 +343,7 @@ public class TaskStateExtractionStrategy {
      */
     private void parseAIResponse(String jsonResponse, ExtractionResult result, String currentMessage) {
         try {
+            logger.info("PARSING JSON: {}", jsonResponse.substring(0, Math.min(500, jsonResponse.length())));
             JsonNode root = objectMapper.readTree(jsonResponse);
             
             // Goal
