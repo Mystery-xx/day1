@@ -103,8 +103,11 @@ public class AiChatService {
             ragSystemMessage.setRole("system");
             
             // If RAG found no relevant sources (all below 50% threshold), instruct AI to admit lack of knowledge but continue the conversation
+            // This message is placed AFTER TaskState context to ensure AI sees it last
+            String ragFallbackMessage = "⚠️ В базе знаний НЕ НАЙДЕНО релевантных документов по этому вопросу. Я НЕ могу дать ответ с опорой на вашу документацию. Если я буду отвечать, я ОБЯЗАТЕЛЬНО начну с предупреждения, что это информация НЕ из вашей базы знаний, а общие знания. Я могу предложить общую практику по теме, но только честно предупредив об отсутствии источников.";
+            
             if (ragResult.getContext() == null || ragResult.getContext().isBlank()) {
-                ragSystemMessage.setContent("⚠️ В базе знаний НЕ НАЙДЕНО релевантных документов по этому вопросу. Я НЕ могу дать ответ с опорой на вашу документацию. Если я буду отвечать, я ОБЯЗАТЕЛЬНО начну с предупреждения, что это информация НЕ из вашей базы знаний, а общие знания. Я могу предложить общую практику по теме, но только честно предупредив об отсутствии источников.");
+                ragSystemMessage.setContent(ragFallbackMessage);
             } else {
                 ragSystemMessage.setContent(ragResult.getContext());
             }
@@ -114,11 +117,11 @@ public class AiChatService {
             if (request.getSessionId() != null && !request.getSessionId().isEmpty()) {
                 List<ChatMessageDTO> taskStateContext = taskStateContextStrategy.buildContext(request.getSessionId(), request.getSettings());
                 if (!taskStateContext.isEmpty()) {
-                    // Append TaskState context to the existing RAG system message
+                    // Place TaskState FIRST, then RAG fallback/ctx LAST (so AI sees the RAG warning last)
                     ChatMessageDTO existingSystemMessage = messages.get(0);
-                    String combinedContent = existingSystemMessage.getContent() + "\n\n" + taskStateContext.get(0).getContent();
+                    String combinedContent = taskStateContext.get(0).getContent() + "\n\n" + existingSystemMessage.getContent();
                     existingSystemMessage.setContent(combinedContent);
-                    logger.debug("Combined RAG and TaskState context for session {}", request.getSessionId());
+                    logger.debug("Combined TaskState + RAG context for session {} (TaskState first, RAG last)", request.getSessionId());
                 }
             }
             
