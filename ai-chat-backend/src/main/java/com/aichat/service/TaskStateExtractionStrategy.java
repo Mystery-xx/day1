@@ -3,61 +3,48 @@ package com.aichat.service;
 import com.aichat.dto.ClarificationDTO;
 import com.aichat.dto.ConstraintDTO;
 import com.aichat.entity.TaskStatus;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Сервис для автоматического извлечения состояния задачи из диалога с пользователем.
- * Извлекает: goal, status, constraints, clarifications.
+ * Использует AI/LLM для интеллектуального извлечения: goal, status, constraints, clarifications.
  */
 @Service
 public class TaskStateExtractionStrategy {
 
     private static final Logger logger = LoggerFactory.getLogger(TaskStateExtractionStrategy.class);
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final WebClient webClient;
 
-    // Паттерны для определения статуса диалога
-    private static final Pattern CLARIFYING_PATTERN = Pattern.compile(
-        "(\\?|уточните|какой|какая|какое|какие|что.*выбрать|как.*выбрать|какой.*использовать|предпочитаете|нужно.*знать)",
-        Pattern.CASE_INSENSITIVE
-    );
+    @Value("${ai.api.url:}")
+    private String aiApiUrl;
 
-    private static final Pattern PLANNING_PATTERN = Pattern.compile(
-        "(план|архитектура|шаги|структура|спроектирую|спланирую|предлагаю.*сделать|сначала.*потом|последовательность|этапы)",
-        Pattern.CASE_INSENSITIVE
-    );
+    @Value("${ai.api.key:}")
+    private String aiApiKey;
 
-    private static final Pattern EXECUTING_PATTERN = Pattern.compile(
-        "(код|реализую|создаю.*файл|пишу.*код|добавляю.*класс|создаю.*класс|имплементирую|начинаю.*реализацию|код.*готов|файл.*создан)",
-        Pattern.CASE_INSENSITIVE
-    );
+    @Value("${ai.model:}")
+    private String aiModel;
 
-    private static final Pattern DONE_PATTERN = Pattern.compile(
-        "(готово|завершено|все.*тесты.*проходят|реализация.*завершена|работа.*завершена|выполнено|успешно.*выполнено)",
-        Pattern.CASE_INSENSITIVE
-    );
+    @Value("${taskstate.extraction.model:}")
+    private String extractionModel;
 
-    // Паттерны для извлечения ограничений
-    private static final Pattern CONSTRAINT_NOT_USE = Pattern.compile(
-        "(не.*используй|не.*использовать|avoid.*|don't.*use|without.*|no.*\\s+\\w+)",
-        Pattern.CASE_INSENSITIVE
-    );
-
-    private static final Pattern CONSTRAINT_ONLY = Pattern.compile(
-        "(только.*|only.*|exclusively.*)",
-        Pattern.CASE_INSENSITIVE
-    );
-
-    private static final Pattern CONSTRAINT_WITHOUT = Pattern.compile(
-        "(без.*|without.*|excluding.*)",
-        Pattern.CASE_INSENSITIVE
-    );
+    public TaskStateExtractionStrategy() {
+        this.webClient = WebClient.builder().build();
+    }
 
     /**
      * Результат извлечения состояния задачи.
@@ -108,10 +95,7 @@ public class TaskStateExtractionStrategy {
 
     /**
      * Извлекает состояние задачи из истории диалога и текущего сообщения.
-     *
-     * @param conversationHistory История диалога в формате "User: ...\nAI: ...\nUser: ..."
-     * @param currentMessage      Текущее сообщение (последнее)
-     * @return ExtractionResult с извлеченными goal, status, constraints, clarifications
+     * Использует AI/LLM для интеллектуального извлечения.
      */
     public ExtractionResult extractTaskState(String conversationHistory, String currentMessage) {
         logger.debug("Extracting task state from conversation history (length={}) and current message (length={})",
@@ -120,17 +104,21 @@ public class TaskStateExtractionStrategy {
 
         ExtractionResult result = new ExtractionResult();
 
-        // 1. Извлекаем goal из первого сообщения пользователя или currentMessage
-        result.setGoal(extractGoal(conversationHistory, currentMessage));
-
-        // 2. Определяем статус по последнему сообщению AI
-        result.setStatus(determineStatus(conversationHistory, currentMessage));
-
-        // 3. Извлекаем ограничения из всех сообщений пользователя + currentMessage
-        result.setConstraints(extractConstraints(conversationHistory, currentMessage));
-
-        // 4. Извлекаем clarifications (ответы на вопросы AI)
-        result.setClarifications(extractClarifications(conversationHistory));
+        try {
+            // Формируем контекст для AI
+            String context = buildContext(conversationHistory, currentMessage);
+            
+            // Вызываем AI для извлечения TaskState
+            String aiResponse = callExtractionAI(context);
+            
+            // Парсим JSON ответ
+            parseAIResponse(aiResponse, result, currentMessage);
+            
+        } catch (Exception e) {
+            logger.error("Failed to extract TaskState using AI, falling back to basic extraction", e);
+            // Fallback к базовому извлечению
+            fallbackExtraction(result, conversationHistory, currentMessage);
+        }
 
         logger.info("Task state extracted: goal='{}', status={}, constraints={}, clarifications={}",
                 result.getGoal(), result.getStatus(),
@@ -140,359 +128,238 @@ public class TaskStateExtractionStrategy {
     }
 
     /**
-     * Извлекает цель задачи из первого сообщения пользователя или currentMessage.
+     * Формирует контекст для AI extraction.
      */
-    private String extractGoal(String conversationHistory, String currentMessage) {
-        // Сначала пробуем извлечь из conversation history
+    private String buildContext(String conversationHistory, String currentMessage) {
+        StringBuilder context = new StringBuilder();
+        
         if (conversationHistory != null && !conversationHistory.trim().isEmpty()) {
+            context.append("Conversation History:\n");
+            context.append(conversationHistory);
+            context.append("\n\n");
+        }
+        
+        if (currentMessage != null && !currentMessage.trim().isEmpty()) {
+            context.append("Current Message: ");
+            context.append(currentMessage);
+        }
+        
+        return context.toString();
+    }
+
+    /**
+     * Вызывает AI API для извлечения TaskState.
+     */
+    private String callExtractionAI(String context) {
+        String prompt = buildExtractionPrompt(context);
+        
+        logger.debug("Calling AI for TaskState extraction");
+        
+        try {
+            String response = webClient.post()
+                .uri(aiApiUrl + "/chat/completions")
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + aiApiKey)
+                .bodyValue(buildRequestBody(prompt))
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+            
+            logger.debug("AI extraction response received");
+            return extractContentFromResponse(response);
+            
+        } catch (Exception e) {
+            logger.error("AI extraction call failed", e);
+            throw new RuntimeException("Failed to call AI for TaskState extraction", e);
+        }
+    }
+
+    /**
+     * Строит prompt для AI extraction.
+     */
+    private String buildExtractionPrompt(String context) {
+        return """
+            Analyze the conversation and extract the task state. Return ONLY valid JSON in this exact format:
+            
+            {
+              "goal": "The main goal/task the user wants to accomplish",
+              "status": "CLARIFYING|PLANNING|EXECUTING|DONE",
+              "constraints": [
+                {"type": "TECHNICAL", "description": "constraint description", "isViolated": false}
+              ],
+              "clarifications": [
+                {"question": "question asked by AI", "answer": "user's answer", "timestamp": "ISO-8601"}
+              ]
+            }
+            
+            Status definitions:
+            - CLARIFYING: AI is asking questions to understand requirements
+            - PLANNING: AI is proposing architecture, plan, or structure
+            - EXECUTING: AI is writing code, creating files, implementing
+            - DONE: Task is complete, all tests passing
+            
+            Constraints are technical limitations mentioned by user (e.g., "don't use monolith", "only use React").
+            Clarifications are Q&A pairs where AI asked a question and user answered.
+            
+            Conversation to analyze:
+            %s
+            
+            Return ONLY JSON, no markdown, no explanations.
+            """.formatted(context);
+    }
+
+    /**
+     * Строит request body для AI API.
+     */
+    private Object buildRequestBody(String prompt) {
+        String modelToUse = extractionModel != null && !extractionModel.isEmpty() ? extractionModel : aiModel;
+        
+        return java.util.Map.of(
+            "model", modelToUse,
+            "messages", java.util.List.of(
+                java.util.Map.of("role", "user", "content", prompt)
+            ),
+            "temperature", 0.3,
+            "max_tokens", 1000
+        );
+    }
+
+    /**
+     * Извлекает content из AI response.
+     */
+    private String extractContentFromResponse(String response) {
+        try {
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode choices = root.get("choices");
+            if (choices != null && choices.isArray() && choices.size() > 0) {
+                JsonNode message = choices.get(0).get("message");
+                if (message != null) {
+                    String content = message.get("content").asText();
+                    // Удаляем markdown code blocks если есть
+                    content = content.replaceAll("```json\\s*", "").replaceAll("```\\s*", "").trim();
+                    return content;
+                }
+            }
+            throw new RuntimeException("Invalid AI response format");
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to parse AI response", e);
+        }
+    }
+
+    /**
+     * Парсит AI JSON ответ.
+     */
+    private void parseAIResponse(String jsonResponse, ExtractionResult result, String currentMessage) {
+        try {
+            JsonNode root = objectMapper.readTree(jsonResponse);
+            
+            // Goal
+            JsonNode goalNode = root.get("goal");
+            if (goalNode != null && !goalNode.asText().isEmpty()) {
+                result.setGoal(goalNode.asText().trim());
+            } else if (currentMessage != null && !currentMessage.trim().isEmpty()) {
+                // Fallback: используем currentMessage как goal
+                result.setGoal(currentMessage.trim());
+            }
+            
+            // Status
+            JsonNode statusNode = root.get("status");
+            if (statusNode != null) {
+                try {
+                    result.setStatus(TaskStatus.valueOf(statusNode.asText().toUpperCase()));
+                } catch (IllegalArgumentException e) {
+                    logger.warn("Invalid status from AI: {}, defaulting to CLARIFYING", statusNode.asText());
+                    result.setStatus(TaskStatus.CLARIFYING);
+                }
+            } else {
+                result.setStatus(TaskStatus.CLARIFYING);
+            }
+            
+            // Constraints
+            JsonNode constraintsNode = root.get("constraints");
+            if (constraintsNode != null && constraintsNode.isArray()) {
+                List<ConstraintDTO> constraints = new ArrayList<>();
+                String goal = result.getGoal();
+                
+                for (JsonNode constraintNode : constraintsNode) {
+                    String description = constraintNode.has("description") ? 
+                        constraintNode.get("description").asText() : "";
+                    String type = constraintNode.has("type") ? 
+                        constraintNode.get("type").asText() : "TECHNICAL";
+                    boolean isViolated = constraintNode.has("isViolated") && 
+                        constraintNode.get("isViolated").asBoolean(false);
+                    
+                    // Пропускаем если описание пустое или дублирует goal
+                    if (!description.isEmpty() && 
+                        (goal == null || goal.isEmpty() || !goal.toLowerCase().contains(description.toLowerCase()))) {
+                        ConstraintDTO constraint = new ConstraintDTO();
+                        constraint.setType(type);
+                        constraint.setDescription(description);
+                        constraint.setIsViolated(isViolated);
+                        constraints.add(constraint);
+                        logger.debug("Extracted constraint: {}: {}", type, description);
+                    }
+                }
+                
+                result.setConstraints(constraints);
+            }
+            
+            // Clarifications
+            JsonNode clarificationsNode = root.get("clarifications");
+            if (clarificationsNode != null && clarificationsNode.isArray()) {
+                List<ClarificationDTO> clarifications = new ArrayList<>();
+                
+                for (JsonNode clarificationNode : clarificationsNode) {
+                    String question = clarificationNode.has("question") ? 
+                        clarificationNode.get("question").asText() : "";
+                    String answer = clarificationNode.has("answer") ? 
+                        clarificationNode.get("answer").asText() : "";
+                    
+                    if (!question.isEmpty() && !answer.isEmpty()) {
+                        String timestampStr = clarificationNode.has("timestamp") ? 
+                            clarificationNode.get("timestamp").asText() : null;
+                        Instant timestamp = timestampStr != null ? 
+                            Instant.parse(timestampStr) : Instant.now();
+                        
+                        clarifications.add(new ClarificationDTO(question, answer, timestamp));
+                        logger.debug("Extracted clarification Q&A: Q='{}' A='{}'", question, answer);
+                    }
+                }
+                
+                result.setClarifications(clarifications);
+            }
+            
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to parse AI JSON response: {}", jsonResponse, e);
+            throw new RuntimeException("Invalid JSON from AI", e);
+        }
+    }
+
+    /**
+     * Fallback extraction если AI вызов не удался.
+     */
+    private void fallbackExtraction(ExtractionResult result, String conversationHistory, String currentMessage) {
+        logger.debug("Using fallback extraction");
+        
+        // Goal из currentMessage или первого сообщения пользователя
+        if (currentMessage != null && !currentMessage.trim().isEmpty()) {
+            result.setGoal(currentMessage.trim());
+        } else if (conversationHistory != null) {
             String[] lines = conversationHistory.split("\n");
             for (String line : lines) {
-                // Ищем первое сообщение пользователя
                 if (line.trim().startsWith("User:") || line.trim().startsWith("Пользователь:")) {
                     String message = line.replaceFirst("^(User:|Пользователь:)", "").trim();
                     if (!message.isEmpty()) {
-                        String goal = normalizeGoal(message);
-                        logger.debug("Extracted goal from first user message: '{}'", goal);
-                        return goal;
+                        result.setGoal(message);
+                        break;
                     }
                 }
             }
         }
-
-        // Если история пуста или не содержит сообщения пользователя, используем currentMessage
-        if (currentMessage != null && !currentMessage.trim().isEmpty()) {
-            String goal = normalizeGoal(currentMessage);
-            logger.debug("Extracted goal from currentMessage: '{}'", goal);
-            return goal;
-        }
-
-        logger.debug("No user goal found in conversation history or currentMessage");
-        return "";
-    }
-
-    /**
-     * Нормализует текст цели - убирает лишние слова, оставляет суть.
-     */
-    private String normalizeGoal(String message) {
-        // Убираем вводные слова
-        String normalized = message
-                .replaceAll("(?i)^(пожалуйста|нужно|необходимо|сделай|напиши|создай|реализуй|давай|хочу)", "")
-                .trim();
-
-        // Убираем конечные знаки препинания
-        normalized = normalized.replaceAll("[.!?]+$", "").trim();
-
-        // Capitalize first letter
-        if (!normalized.isEmpty() && Character.isLowerCase(normalized.charAt(0))) {
-            normalized = Character.toUpperCase(normalized.charAt(0)) + normalized.substring(1);
-        }
-
-        return normalized;
-    }
-
-    /**
-     * Определяет статус диалога по ключевым словам в сообщениях AI.
-     */
-    private TaskStatus determineStatus(String conversationHistory, String currentMessage) {
-        // Проверяем текущее сообщение (если это сообщение AI)
-        if (currentMessage != null && !currentMessage.trim().isEmpty()) {
-            logger.debug("Checking currentMessage: '{}'", currentMessage);
-            TaskStatus status = detectStatusInText(currentMessage);
-            if (status != null) {
-                logger.debug("Status detected from current message: {}", status);
-                return status;
-            }
-        }
-
-        // Если не определили по текущему, ищем последнее сообщение AI в истории
-        if (conversationHistory != null && !conversationHistory.trim().isEmpty()) {
-            String[] lines = conversationHistory.split("\n");
-            logger.debug("Checking {} lines in conversation history", lines.length);
-            
-            // Ищем с конца, чтобы найти последнее сообщение AI
-            for (int i = lines.length - 1; i >= 0; i--) {
-                String line = lines[i].trim();
-                logger.debug("Line {}: '{}'", i, line);
-                
-                // Проверяем сообщение AI с префиксом или без
-                String aiMessage = null;
-                if (line.startsWith("AI:") || line.startsWith("Assistant:")) {
-                    aiMessage = line.replaceFirst("^(AI:|Assistant:)", "").trim();
-                    logger.debug("Extracted AI message (prefix): '{}'", aiMessage);
-                } else if (line.startsWith("AI ") || line.startsWith("Assistant ")) {
-                    aiMessage = line.replaceFirst("^(AI|Assistant)\\s+", "").trim();
-                    logger.debug("Extracted AI message (space): '{}'", aiMessage);
-                } else if (!line.startsWith("User:") && !line.startsWith("Пользователь:") && 
-                           !line.startsWith("User ") && !line.startsWith("Пользователь ")) {
-                    // Если строка не от пользователя, считаем что это AI
-                    aiMessage = line;
-                    logger.debug("Extracted AI message (no prefix): '{}'", aiMessage);
-                }
-                
-                if (aiMessage != null && !aiMessage.isEmpty()) {
-                    TaskStatus status = detectStatusInText(aiMessage);
-                    if (status != null) {
-                        logger.debug("Status detected from AI history message: {}", status);
-                        return status;
-                    }
-                    logger.debug("No status detected in: '{}'", aiMessage);
-                }
-            }
-        }
-
-        // По умолчанию возвращаем CLARIFYING
-        logger.debug("Status not detected, defaulting to CLARIFYING");
-        return TaskStatus.CLARIFYING;
-    }
-
-    /**
-     * Detects status from text using pattern matching.
-     */
-    private TaskStatus detectStatusInText(String text) {
-        if (text == null || text.isEmpty()) {
-            return null;
-        }
-
-        String lowerText = text.toLowerCase();
         
-        // Проверяем паттерны в порядке приоритета
-        // DONE имеет высший приоритет (завершение работы)
-        if (DONE_PATTERN.matcher(text).find() || 
-            lowerText.contains("готово") || lowerText.contains("завершено") ||
-            lowerText.contains("done") || lowerText.contains("complete") || lowerText.contains("finished")) {
-            return TaskStatus.DONE;
-        }
-
-        // EXECUTING - код пишется
-        if (EXECUTING_PATTERN.matcher(text).find() || 
-            lowerText.contains("код") || lowerText.contains("создаю") ||
-            lowerText.contains("code") || lowerText.contains("creating") || lowerText.contains("implementing")) {
-            return TaskStatus.EXECUTING;
-        }
-
-        // PLANNING - планируется структура
-        if (PLANNING_PATTERN.matcher(text).find() || 
-            lowerText.contains("план") || lowerText.contains("план:") ||
-            lowerText.contains("plan") || lowerText.contains("architecture") || lowerText.contains("steps")) {
-            return TaskStatus.PLANNING;
-        }
-
-        // CLARIFYING - задаются вопросы
-        if (CLARIFYING_PATTERN.matcher(text).find() || text.contains("?") || lowerText.contains("what") || lowerText.contains("which")) {
-            return TaskStatus.CLARIFYING;
-        }
-
-        return null;
-    }
-
-    /**
-     * Извлекает ограничения из всех сообщений пользователя.
-     */
-    private List<ConstraintDTO> extractConstraints(String conversationHistory, String currentMessage) {
-        List<ConstraintDTO> constraints = new ArrayList<>();
-
-        // Извлекаем goal для последующей проверки на дубликаты
-        String goal = extractGoal(conversationHistory, currentMessage);
-
-        // Сначала извлекаем из conversation history
-        if (conversationHistory != null && !conversationHistory.trim().isEmpty()) {
-            constraints.addAll(extractConstraintsFromText(conversationHistory, goal));
-        }
-
-        // Затем извлекаем из currentMessage (если есть)
-        if (currentMessage != null && !currentMessage.trim().isEmpty()) {
-            constraints.addAll(extractConstraintsFromText(currentMessage, goal));
-        }
-
-        return constraints;
-    }
-
-    /**
-     * Извлекает ограничения из текста (сообщения пользователя).
-     */
-    private List<ConstraintDTO> extractConstraintsFromText(String text, String goal) {
-        List<ConstraintDTO> constraints = new ArrayList<>();
-
-        if (text == null || text.trim().isEmpty()) {
-            return constraints;
-        }
-
-        String[] lines = text.split("\n");
-        for (String line : lines) {
-            String message = line.trim();
-            
-            // Проверяем сообщения пользователя с префиксом или без
-            if (message.startsWith("User:") || message.startsWith("Пользователь:")) {
-                message = message.replaceFirst("^(User:|Пользователь:)", "").trim();
-                constraints.addAll(extractConstraintsFromMessage(message, goal));
-            }
-            // Если нет префикса - считаем что это чистое сообщение пользователя
-            else if (!message.isEmpty() && !message.startsWith("AI:") && !message.startsWith("Assistant:")) {
-                constraints.addAll(extractConstraintsFromMessage(message, goal));
-            }
-        }
-
-        return constraints;
-    }
-
-    /**
-     * Извлекает ограничения из одного сообщения.
-     */
-    private List<ConstraintDTO> extractConstraintsFromMessage(String message, String goal) {
-        List<ConstraintDTO> constraints = new ArrayList<>();
-
-        if (message == null || message.trim().isEmpty()) {
-            return constraints;
-        }
-
-        // Ищем паттерны ограничений
-        List<String> foundConstraints = new ArrayList<>();
-
-        // "не используй X" - извлекаем всю фразу
-        Matcher notUseMatcher = CONSTRAINT_NOT_USE.matcher(message);
-        while (notUseMatcher.find()) {
-            String constraint = extractFullConstraintPhrase(message, notUseMatcher.start());
-            if (!constraint.isEmpty() && !foundConstraints.contains(constraint)) {
-                foundConstraints.add(constraint);
-            }
-        }
-
-        // "только Y" - извлекаем всю фразу
-        Matcher onlyMatcher = CONSTRAINT_ONLY.matcher(message);
-        while (onlyMatcher.find()) {
-            String constraint = extractFullConstraintPhrase(message, onlyMatcher.start());
-            if (!constraint.isEmpty() && !foundConstraints.contains(constraint)) {
-                foundConstraints.add(constraint);
-            }
-        }
-
-        // "без Z" - извлекаем всю фразу
-        Matcher withoutMatcher = CONSTRAINT_WITHOUT.matcher(message);
-        while (withoutMatcher.find()) {
-            String constraint = extractFullConstraintPhrase(message, withoutMatcher.start());
-            if (!constraint.isEmpty() && !foundConstraints.contains(constraint)) {
-                foundConstraints.add(constraint);
-            }
-        }
-
-        // Добавляем найденные ограничения, исключая те что являются подстрокой goal
-        for (String constraintText : foundConstraints) {
-            // Пропускаем ограничение если оно содержится в goal (чтобы избежать дублирования)
-            if (goal != null && !goal.isEmpty() && goal.toLowerCase().contains(constraintText.toLowerCase())) {
-                logger.debug("Skipping constraint '{}' as it is part of goal '{}'", constraintText, goal);
-                continue;
-            }
-            
-            ConstraintDTO constraint = new ConstraintDTO();
-            constraint.setType(determineConstraintType(constraintText));
-            constraint.setDescription(constraintText);
-            constraint.setIsViolated(false);
-            constraints.add(constraint);
-            logger.debug("Extracted constraint: {}", constraintText);
-        }
-
-        return constraints;
-    }
-
-    /**
-     * Извлекает полную фразу ограничения начиная от указанной позиции.
-     */
-    private String extractFullConstraintPhrase(String message, int startPos) {
-        // Ищем начало фразы (идем назад до начала предложения или запятой)
-        int phraseStart = startPos;
-        while (phraseStart > 0) {
-            char c = message.charAt(phraseStart - 1);
-            if (c == '.' || c == ';' || c == ':' || c == '!') {
-                phraseStart++; // пропускаем разделитель
-                break;
-            }
-            phraseStart--;
-        }
-
-        // Ищем конец фразы (до точки, запятой или конца сообщения)
-        int phraseEnd = startPos;
-        while (phraseEnd < message.length()) {
-            char c = message.charAt(phraseEnd);
-            if (c == '.' || c == ';' || c == '!' || c == '?') {
-                break;
-            }
-            phraseEnd++;
-        }
-
-        // Извлекаем фразу и чистим от лишних пробелов
-        String phrase = message.substring(phraseStart, phraseEnd).trim();
+        // Status по умолчанию
+        result.setStatus(TaskStatus.CLARIFYING);
         
-        // Убираем конечные знаки препинания
-        phrase = phrase.replaceAll("[.!?;:]+$", "").trim();
-        
-        return phrase;
-    }
-
-    /**
-     * Определяет тип ограничения по тексту.
-     */
-    private String determineConstraintType(String constraintText) {
-        String lower = constraintText.toLowerCase();
-
-        if (lower.contains("не используй") || lower.contains("не использовать") ||
-            lower.contains("avoid") || lower.contains("don't use") || lower.contains("without")) {
-            return "TECHNICAL";
-        }
-
-        if (lower.contains("только") || lower.contains("only") || lower.contains("exclusively")) {
-            return "TECHNICAL";
-        }
-
-        if (lower.contains("без") || lower.contains("without")) {
-            return "TECHNICAL";
-        }
-
-        // По умолчанию TECHNICAL
-        return "TECHNICAL";
-    }
-
-    /**
-     * Извлекает clarifications - пары вопрос-ответ из диалога.
-     */
-    private List<ClarificationDTO> extractClarifications(String conversationHistory) {
-        List<ClarificationDTO> clarifications = new ArrayList<>();
-
-        if (conversationHistory == null || conversationHistory.trim().isEmpty()) {
-            return clarifications;
-        }
-
-        String[] lines = conversationHistory.split("\n");
-        String lastAiQuestion = null;
-
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].trim();
-
-            // Проверяем, задал ли AI вопрос
-            if (line.startsWith("AI:") || line.startsWith("Assistant:")) {
-                String aiMessage = line.replaceFirst("^(AI:|Assistant:)", "").trim();
-                // Если сообщение содержит "?", AI задал вопрос
-                if (aiMessage.contains("?")) {
-                    lastAiQuestion = aiMessage;
-                    logger.debug("AI asked question at line {}: '{}'", i,
-                            aiMessage.substring(0, Math.min(50, aiMessage.length())));
-                }
-            }
-            // Если AI задал вопрос, следующее сообщение пользователя - ответ
-            else if (lastAiQuestion != null && (line.startsWith("User:") || line.startsWith("Пользователь:"))) {
-                String userMessage = line.replaceFirst("^(User:|Пользователь:)", "").trim();
-                if (!userMessage.isEmpty()) {
-                    ClarificationDTO clarification = new ClarificationDTO(lastAiQuestion, userMessage, Instant.now());
-                    clarifications.add(clarification);
-                    logger.debug("Extracted clarification Q&A: Q='{}' A='{}'", lastAiQuestion, userMessage);
-                }
-                lastAiQuestion = null;
-            }
-            // Если сообщение не от пользователя и не AI с вопросом, сбрасываем
-            else if (!line.isEmpty() && !line.startsWith("User:") && !line.startsWith("Пользователь:")) {
-                lastAiQuestion = null;
-            }
-        }
-
-        return clarifications;
+        // Constraints и clarifications остаются пустыми
     }
 }

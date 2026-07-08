@@ -44,6 +44,10 @@ ai:
     stop: ${AI_STOP:}
     history-limit: ${AI_HISTORY_LIMIT:10}
 
+taskstate:
+  extraction:
+    model: ${TASKSTATE_EXTRACTION_MODEL:}
+
 logging:
   level:
     com.aichat: DEBUG
