@@ -102,9 +102,9 @@ public class AiChatService {
             ChatMessageDTO ragSystemMessage = new ChatMessageDTO();
             ragSystemMessage.setRole("system");
             
-            // If RAG found no relevant sources (all below 50% threshold), instruct AI to say "I don't know"
+            // If RAG found no relevant sources (all below 50% threshold), instruct AI to admit lack of knowledge but continue the conversation
             if (ragResult.getContext() == null || ragResult.getContext().isBlank()) {
-                ragSystemMessage.setContent("You don't have enough information to answer this question because no relevant documents were found in the knowledge base. Politely tell the user that you don't know the answer and ask them to clarify or rephrase their question.");
+                ragSystemMessage.setContent("В базе знаний не найдено релевантных документов по этому вопросу. Поэтому я не могу дать точный ответ с опорой на документацию. Однако я могу предложить общую практику по этой теме из моих общих знаний. Я честно предупрежу, что это информация не из вашей базы знаний, но постараюсь помочь максимально полезными рекомендациями.");
             } else {
                 ragSystemMessage.setContent(ragResult.getContext());
             }
