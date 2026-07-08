@@ -10,6 +10,7 @@ import com.aichat.dto.ModelInfo;
 import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SummaryResult;
 import com.aichat.dto.RagContextResult;
+import com.aichat.dto.ConstraintDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -35,6 +36,9 @@ import java.util.regex.Matcher;
 import com.aichat.service.McpClientService;
 import com.aichat.service.McpSessionClient;
 import com.aichat.service.RagSearchService;
+import com.aichat.context.TaskStateContextStrategy;
+import com.aichat.service.TaskStateExtractionStrategy;
+import com.aichat.service.TaskStateService;
 
 @Service
 public class AiChatService {
@@ -48,16 +52,23 @@ public class AiChatService {
     private final ContextStrategyFactory contextStrategyFactory;
     private final McpClientService mcpClientService;
     private final RagSearchService ragSearchService;
+    private final TaskStateContextStrategy taskStateContextStrategy;
+    private final TaskStateExtractionStrategy taskStateExtractionStrategy;
+    private final TaskStateService taskStateService;
 
     public AiChatService(AiChatProperties properties, ChatHistoryService historyService,
                          ContextStrategyFactory contextStrategyFactory, McpClientService mcpClientService,
-                         RagSearchService ragSearchService) {
+                         RagSearchService ragSearchService, TaskStateContextStrategy taskStateContextStrategy,
+                         TaskStateExtractionStrategy taskStateExtractionStrategy, TaskStateService taskStateService) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         this.historyService = historyService;
         this.contextStrategyFactory = contextStrategyFactory;
         this.mcpClientService = mcpClientService;
         this.ragSearchService = ragSearchService;
+        this.taskStateContextStrategy = taskStateContextStrategy;
+        this.taskStateExtractionStrategy = taskStateExtractionStrategy;
+        this.taskStateService = taskStateService;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(120));
@@ -99,7 +110,19 @@ public class AiChatService {
             }
             messages.add(ragSystemMessage);
             
-            // 2. Add conversation history (if sessionId provided and sendHistory is true)
+            // 2. Add TaskState context (if exists) - combined with RAG in the same system message
+            if (request.getSessionId() != null && !request.getSessionId().isEmpty()) {
+                List<ChatMessageDTO> taskStateContext = taskStateContextStrategy.buildContext(request.getSessionId(), request.getSettings());
+                if (!taskStateContext.isEmpty()) {
+                    // Append TaskState context to the existing RAG system message
+                    ChatMessageDTO existingSystemMessage = messages.get(0);
+                    String combinedContent = existingSystemMessage.getContent() + "\n\n" + taskStateContext.get(0).getContent();
+                    existingSystemMessage.setContent(combinedContent);
+                    logger.debug("Combined RAG and TaskState context for session {}", request.getSessionId());
+                }
+            }
+            
+            // 3. Add conversation history (if sessionId provided and sendHistory is true)
             if (request.getSessionId() != null && !request.getSessionId().isEmpty() && shouldSendHistory(request.getSettings())) {
                 ContextStrategyType strategyType = ContextStrategyType.fromString(
                         request.getSettings() != null ? request.getSettings().getContextStrategy() : null);
@@ -115,16 +138,22 @@ public class AiChatService {
                 logger.debug("Added {} history messages to RAG request", history.size());
             }
             
-            // 3. Add current user message
+            // 4. Add current user message
             ChatMessageDTO userMessage = new ChatMessageDTO();
             userMessage.setRole("user");
             userMessage.setContent(request.getMessage());
             messages.add(userMessage);
             
             requestBody = buildRequestBodyWithMessages(request, messages);
+            
+            // Auto-extract TaskState after building conversation history
+            extractAndUpdateTaskState(request.getSessionId(), messages, request.getMessage());
         } else {
             // Standard flow without RAG
             requestBody = buildRequestBody(request);
+            
+            // Auto-extract TaskState after building conversation history
+            extractAndUpdateTaskState(request.getSessionId(), null, request.getMessage());
         }
         
         ChatRequest.ModelSettings requestSettings = request.getSettings();
@@ -568,6 +597,20 @@ public class AiChatService {
         String sessionId = request.getSessionId();
         logger.debug("Building request for session {} with strategy {}", sessionId,
                 requestSettings != null ? requestSettings.getContextStrategy() : "default");
+        
+        // Add TaskState context as system message (if exists)
+        if (sessionId != null && !sessionId.isEmpty()) {
+            List<ChatMessageDTO> taskStateContext = taskStateContextStrategy.buildContext(sessionId, requestSettings);
+            if (!taskStateContext.isEmpty()) {
+                Map<String, String> systemMessage = new HashMap<>();
+                systemMessage.put("role", "system");
+                systemMessage.put("content", taskStateContext.get(0).getContent());
+                messages.add(systemMessage);
+                logger.debug("Added TaskState context for session {}", sessionId);
+            }
+        }
+        
+        // Add conversation history (if sessionId provided and sendHistory is true)
         if (sessionId != null && !sessionId.isEmpty() && shouldSendHistory(requestSettings)) {
             ContextStrategyType strategyType = ContextStrategyType.fromString(
                     requestSettings != null ? requestSettings.getContextStrategy() : null);
@@ -867,6 +910,69 @@ public class AiChatService {
             
         } catch (Exception e) {
             logger.error("Failed to log AI request: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Auto-extract TaskState from conversation and update database.
+     * Called after building conversation history for each user message.
+     */
+    private void extractAndUpdateTaskState(String sessionId, List<ChatMessageDTO> messages, String currentMessage) {
+        if (sessionId == null || sessionId.isEmpty()) {
+            logger.debug("No sessionId provided, skipping TaskState extraction");
+            return;
+        }
+
+        try {
+            // First: ensure TaskState exists (create if not found)
+            taskStateService.getOrCreateTaskState(sessionId);
+            logger.debug("TaskState ensured for session {}", sessionId);
+
+            // Build conversation history in format "User: ...\nAI: ...\nUser: ..."
+            StringBuilder conversationHistory = new StringBuilder();
+            if (messages != null) {
+                for (ChatMessageDTO msg : messages) {
+                    if ("system".equals(msg.getRole())) {
+                        continue;
+                    }
+                    String roleLabel = "user".equals(msg.getRole()) ? "User" : "AI";
+                    conversationHistory.append(roleLabel).append(": ").append(msg.getContent()).append("\n");
+                }
+            }
+
+            // Extract TaskState
+            TaskStateExtractionStrategy.ExtractionResult result = taskStateExtractionStrategy.extractTaskState(
+                conversationHistory.toString(), currentMessage);
+
+            // Update TaskState in database
+            if (result.getGoal() != null && !result.getGoal().isEmpty()) {
+                taskStateService.updateGoal(sessionId, result.getGoal());
+                logger.info("TaskState auto-extracted: goal='{}'", result.getGoal());
+            }
+
+            if (result.getStatus() != null) {
+                taskStateService.updateStatus(sessionId, result.getStatus());
+                logger.info("TaskState auto-extracted: status={}", result.getStatus());
+            }
+
+            if (result.getConstraints() != null && !result.getConstraints().isEmpty()) {
+                for (ConstraintDTO constraint : result.getConstraints()) {
+                    taskStateService.addConstraint(sessionId, constraint);
+                    logger.info("TaskState auto-extracted: constraint={}: {}", 
+                        constraint.getType(), constraint.getDescription());
+                }
+            }
+
+            if (result.getClarifications() != null && !result.getClarifications().isEmpty()) {
+                for (String clarification : result.getClarifications()) {
+                    // For clarifications, we only have the answer text
+                    // The question would need to be extracted separately if needed
+                    logger.info("TaskState auto-extracted: clarification='{}'", clarification);
+                }
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to extract TaskState for session {}", sessionId, e);
         }
     }
 }

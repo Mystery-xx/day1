@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import DebugPanel from './components/DebugPanel'
 import SettingsPanel from './components/SettingsPanel'
+import TaskStatePanel from './components/TaskStatePanel'
 import { Message } from './components/Message'
 import { useSession } from './hooks/useSession'
 import { useChatHistory } from './hooks/useChatHistory'
 import { useSessionList } from './hooks/useSessionList'
+import { useTaskState } from './hooks/useTaskState'
 
 function App() {
   const inputRef = useRef(null)
@@ -20,6 +22,7 @@ function App() {
   const { sessionId, isLoading: sessionLoading, createNewSession, clearSession } = useSession()
   const { history: backendHistory, addEntry, refresh } = useChatHistory(sessionId)
   const { sessions, isLoading: sessionsLoading, fetchSessions, deleteSession: deleteSessionFromList } = useSessionList()
+  const { taskState, loading: taskStateLoading, error: taskStateError } = useTaskState(sessionId)
   
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('chat_settings')

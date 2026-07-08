@@ -7,10 +7,15 @@ import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SessionInfoDTO;
 import com.aichat.dto.SessionCreateResponse;
 import com.aichat.dto.StickyFactDTO;
+import com.aichat.dto.TaskStateDTO;
+import com.aichat.dto.ConstraintDTO;
+import com.aichat.dto.ClarificationDTO;
+import com.aichat.entity.TaskStatus;
 import com.aichat.service.AiChatService;
 import com.aichat.service.ChatHistoryService;
 import com.aichat.service.StickyFactService;
 import com.aichat.service.FactExtractionService;
+import com.aichat.service.TaskStateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -41,13 +46,16 @@ public class ChatController {
     private final ChatHistoryService historyService;
     private final StickyFactService stickyFactService;
     private final FactExtractionService factExtractionService;
+    private final TaskStateService taskStateService;
 
     public ChatController(AiChatService chatService, ChatHistoryService historyService,
-                          StickyFactService stickyFactService, FactExtractionService factExtractionService) {
+                          StickyFactService stickyFactService, FactExtractionService factExtractionService,
+                          TaskStateService taskStateService) {
         this.chatService = chatService;
         this.historyService = historyService;
         this.stickyFactService = stickyFactService;
         this.factExtractionService = factExtractionService;
+        this.taskStateService = taskStateService;
     }
 
     @PostMapping
@@ -402,5 +410,102 @@ public class ChatController {
         
         Map<String, String> extractedFacts = factExtractionService.extractAndSaveFacts(sessionId, model, provider);
         return ResponseEntity.ok(extractedFacts);
+    }
+
+    // ==================== Task State Endpoints ====================
+
+    @GetMapping("/sessions/{sessionId}/task-state")
+    public ResponseEntity<TaskStateDTO> getTaskState(@PathVariable String sessionId) {
+        logger.info("Fetching task state for session: {}", sessionId);
+        try {
+            TaskStateDTO taskState = taskStateService.getTaskState(sessionId);
+            return ResponseEntity.ok(taskState);
+        } catch (RuntimeException e) {
+            logger.warn("Task state not found for session {}: {}", sessionId, e.getMessage());
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/sessions/{sessionId}/task-state")
+    public ResponseEntity<TaskStateDTO> createOrUpdateTaskState(
+            @PathVariable String sessionId,
+            @RequestBody(required = false) Map<String, String> body) {
+        logger.info("Creating or updating task state for session: {}", sessionId);
+        
+        String goal = body != null ? body.get("goal") : null;
+        TaskStateDTO taskState = taskStateService.getOrCreateTaskState(sessionId);
+        
+        if (goal != null && !goal.isBlank()) {
+            taskState = taskStateService.updateGoal(sessionId, goal.trim());
+        }
+        
+        return ResponseEntity.ok(taskState);
+    }
+
+    /**
+     * @deprecated TaskState is now auto-extracted from conversation. Manual updates are no longer recommended.
+     */
+    @Deprecated
+    @PutMapping("/sessions/{sessionId}/task-state/goal")
+    public ResponseEntity<TaskStateDTO> updateGoal(
+            @PathVariable String sessionId,
+            @RequestBody Map<String, String> body) {
+        logger.warn("Deprecated endpoint called: PUT /sessions/{}/task-state/goal - TaskState is auto-extracted now", sessionId);
+        String goal = body.get("goal");
+        if (goal == null || goal.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        logger.info("Updating goal for session {}: {}", sessionId, goal);
+        return ResponseEntity.ok(taskStateService.updateGoal(sessionId, goal.trim()));
+    }
+
+    /**
+     * @deprecated TaskState is now auto-extracted from conversation. Manual updates are no longer recommended.
+     */
+    @Deprecated
+    @PutMapping("/sessions/{sessionId}/task-state/constraints")
+    public ResponseEntity<TaskStateDTO> addConstraint(
+            @PathVariable String sessionId,
+            @RequestBody ConstraintDTO constraint) {
+        logger.warn("Deprecated endpoint called: PUT /sessions/{}/task-state/constraints - TaskState is auto-extracted now", sessionId);
+        if (constraint.getType() == null || constraint.getType().isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (constraint.getDescription() == null || constraint.getDescription().isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        logger.info("Adding constraint for session {}: type={}", sessionId, constraint.getType());
+        return ResponseEntity.ok(taskStateService.addConstraint(sessionId, constraint));
+    }
+
+    /**
+     * @deprecated TaskState is now auto-extracted from conversation. Manual updates are no longer recommended.
+     */
+    @Deprecated
+    @PutMapping("/sessions/{sessionId}/task-state/status")
+    public ResponseEntity<TaskStateDTO> updateStatus(
+            @PathVariable String sessionId,
+            @RequestBody Map<String, String> body) {
+        logger.warn("Deprecated endpoint called: PUT /sessions/{}/task-state/status - TaskState is auto-extracted now", sessionId);
+        String statusKey = body.get("status");
+        if (statusKey == null || statusKey.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        try {
+            TaskStatus status = TaskStatus.valueOf(statusKey.toUpperCase());
+            logger.info("Updating status for session {}: {}", sessionId, status);
+            return ResponseEntity.ok(taskStateService.updateStatus(sessionId, status));
+        } catch (IllegalArgumentException e) {
+            logger.warn("Invalid status: {}", statusKey);
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @DeleteMapping("/sessions/{sessionId}/task-state")
+    public ResponseEntity<Void> deleteTaskState(@PathVariable String sessionId) {
+        logger.info("Deleting task state for session: {}", sessionId);
+        taskStateService.deleteTaskState(sessionId);
+        return ResponseEntity.noContent().build();
     }
 }

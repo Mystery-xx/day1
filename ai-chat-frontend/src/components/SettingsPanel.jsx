@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useMcp } from '../hooks/useMcp'
+import { useTaskState } from '../hooks/useTaskState'
 import UploadPanel from './rag/UploadPanel'
 import StatisticsPanel from './rag/StatisticsPanel'
 import SearchPanel from './rag/SearchPanel'
+import TaskStatePanel from './TaskStatePanel'
 
 const STRATEGY_OPTIONS = [
   { value: 'summary', label: 'Summary', description: 'Keep recent messages plus an AI-generated summary of older history' },
@@ -17,12 +19,14 @@ const TABS = [
   { id: 'search', label: '🔍 Search', description: 'Search uploaded documents' },
   { id: 'model', label: '🤖 Model', description: 'AI model settings' },
   { id: 'context', label: '📚 Context', description: 'Context management' },
+  { id: 'task', label: '📋 Task', description: 'Task state management' },
   { id: 'mcp', label: '🔧 MCP', description: 'MCP servers' },
   { id: 'session', label: '💬 Session', description: 'Session management' }
 ]
 
 function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, sessionId, onNewChat, onClearHistory, sessions, onSessionSelect, onDeleteSession, sessionsLoading, onFactsRefreshed }) {
   const { servers, connectedServer, tools, status, error, fetchServers, addServer, connect, disconnect, deleteServer } = useMcp()
+  const { taskState, loading: taskStateLoading, error: taskStateError } = useTaskState(sessionId)
   
   const handleChange = (key, value) => {
     onSettingsChange({
@@ -794,6 +798,16 @@ function SettingsPanel({ settings, onSettingsChange, models, onRefreshModels, se
           </div>
         )}
         </>
+        )}
+        
+        {/* Task State Tab */}
+        {activeTab === 'task' && (
+          <TaskStatePanel
+            sessionId={sessionId}
+            taskState={taskState}
+            loading={taskStateLoading}
+            error={taskStateError}
+          />
         )}
         
         {/* MCP Servers Tab */}
