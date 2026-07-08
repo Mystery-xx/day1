@@ -104,7 +104,7 @@ public class AiChatService {
             
             // If RAG found no relevant sources (all below 50% threshold), instruct AI to admit lack of knowledge but continue the conversation
             if (ragResult.getContext() == null || ragResult.getContext().isBlank()) {
-                ragSystemMessage.setContent("В базе знаний не найдено релевантных документов по этому вопросу. Поэтому я не могу дать точный ответ с опорой на документацию. Однако я могу предложить общую практику по этой теме из моих общих знаний. Я честно предупрежу, что это информация не из вашей базы знаний, но постараюсь помочь максимально полезными рекомендациями.");
+                ragSystemMessage.setContent("⚠️ В базе знаний НЕ НАЙДЕНО релевантных документов по этому вопросу. Я НЕ могу дать ответ с опорой на вашу документацию. Если я буду отвечать, я ОБЯЗАТЕЛЬНО начну с предупреждения, что это информация НЕ из вашей базы знаний, а общие знания. Я могу предложить общую практику по теме, но только честно предупредив об отсутствии источников.");
             } else {
                 ragSystemMessage.setContent(ragResult.getContext());
             }
