@@ -11,6 +11,8 @@ import com.aichat.dto.ChatMessageDTO;
 import com.aichat.dto.SummaryResult;
 import com.aichat.dto.RagContextResult;
 import com.aichat.dto.ConstraintDTO;
+import com.aichat.dto.TaskStateDTO;
+import com.aichat.dto.ClarificationDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -916,10 +918,6 @@ public class AiChatService {
         }
     }
 
-    /**
-     * Auto-extract TaskState from conversation and update database.
-     * Called after building conversation history for each user message.
-     */
     private void extractAndUpdateTaskState(String sessionId, List<ChatMessageDTO> messages, String currentMessage) {
         if (sessionId == null || sessionId.isEmpty()) {
             logger.debug("No sessionId provided, skipping TaskState extraction");
@@ -927,11 +925,9 @@ public class AiChatService {
         }
 
         try {
-            // First: ensure TaskState exists (create if not found)
-            taskStateService.getOrCreateTaskState(sessionId);
+            TaskStateDTO currentState = taskStateService.getOrCreateTaskState(sessionId);
             logger.debug("TaskState ensured for session {}", sessionId);
 
-            // Build conversation history in format "User: ...\nAI: ...\nUser: ..."
             StringBuilder conversationHistory = new StringBuilder();
             if (messages != null) {
                 for (ChatMessageDTO msg : messages) {
@@ -943,34 +939,46 @@ public class AiChatService {
                 }
             }
 
-            // Extract TaskState
             TaskStateExtractionStrategy.ExtractionResult result = taskStateExtractionStrategy.extractTaskState(
                 conversationHistory.toString(), currentMessage);
 
-            // Update TaskState in database
-            if (result.getGoal() != null && !result.getGoal().isEmpty()) {
+            // Update goal ONLY if it's currently empty
+            if (result.getGoal() != null && !result.getGoal().isEmpty() && 
+                (currentState.getGoal() == null || currentState.getGoal().isEmpty()) &&
+                !result.getGoal().equals(currentState.getGoal())) {
                 taskStateService.updateGoal(sessionId, result.getGoal());
-                logger.info("TaskState auto-extracted: goal='{}'", result.getGoal());
+                logger.info("TaskState auto-updated: goal='{}'", result.getGoal());
+            } else if (result.getGoal() != null && !result.getGoal().isEmpty() && 
+                       currentState.getGoal() != null && !currentState.getGoal().isEmpty()) {
+                logger.debug("Skipping goal update - goal already set: '{}'", currentState.getGoal());
             }
 
-            if (result.getStatus() != null) {
+            if (result.getStatus() != null && result.getStatus() != currentState.getStatus()) {
                 taskStateService.updateStatus(sessionId, result.getStatus());
-                logger.info("TaskState auto-extracted: status={}", result.getStatus());
+                logger.info("TaskState auto-updated: status={}", result.getStatus());
             }
 
             if (result.getConstraints() != null && !result.getConstraints().isEmpty()) {
+                List<String> existingConstraintTexts = currentState.getConstraints().stream()
+                    .map(ConstraintDTO::getDescription)
+                    .toList();
+                
                 for (ConstraintDTO constraint : result.getConstraints()) {
-                    taskStateService.addConstraint(sessionId, constraint);
-                    logger.info("TaskState auto-extracted: constraint={}: {}", 
-                        constraint.getType(), constraint.getDescription());
+                    if (!existingConstraintTexts.contains(constraint.getDescription())) {
+                        taskStateService.addConstraint(sessionId, constraint);
+                        logger.info("TaskState auto-updated: constraint={}: {}", 
+                            constraint.getType(), constraint.getDescription());
+                    } else {
+                        logger.debug("Skipping duplicate constraint: {}", constraint.getDescription());
+                    }
                 }
             }
 
             if (result.getClarifications() != null && !result.getClarifications().isEmpty()) {
-                for (String clarification : result.getClarifications()) {
-                    // For clarifications, we only have the answer text
-                    // The question would need to be extracted separately if needed
-                    logger.info("TaskState auto-extracted: clarification='{}'", clarification);
+                for (ClarificationDTO clarification : result.getClarifications()) {
+                    taskStateService.addClarification(sessionId, clarification.getQuestion(), clarification.getAnswer());
+                    logger.info("TaskState clarification saved: Q='{}' A='{}'", 
+                        clarification.getQuestion(), clarification.getAnswer());
                 }
             }
 
