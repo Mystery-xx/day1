@@ -22,7 +22,7 @@ function App() {
   const { sessionId, isLoading: sessionLoading, createNewSession, clearSession } = useSession()
   const { history: backendHistory, addEntry, refresh } = useChatHistory(sessionId)
   const { sessions, isLoading: sessionsLoading, fetchSessions, deleteSession: deleteSessionFromList } = useSessionList()
-  const { taskState, loading: taskStateLoading, error: taskStateError } = useTaskState(sessionId)
+  const { taskState, loading: taskStateLoading, error: taskStateError, refresh: refreshTaskState } = useTaskState(sessionId)
   
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('chat_settings')
@@ -261,6 +261,9 @@ function App() {
               if (response.stickyFactsUpdated && settings.contextStrategy === 'stickyFacts') {
                 refreshStickyFacts()
               }
+              
+              // Refresh TaskState after each message (auto-detection updates it)
+              refreshTaskState()
               
               // Calculate response time in milliseconds
               const responseTime = Math.round(performance.now() - startTime)
