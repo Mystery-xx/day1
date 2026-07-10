@@ -46,3 +46,12 @@ logs/
 tmp/
 temp/
 .tmp/
+
+# Database files (H2)
+ai-chat-backend/data/*.mv.db
+ai-chat-backend/data/*.trace.db
+
+# Test artifacts
+ai-chat-frontend/playwright-report/
+models/
+test-results/
