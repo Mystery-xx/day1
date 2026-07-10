@@ -26,6 +26,7 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -150,15 +151,9 @@ public class AiChatService {
             messages.add(userMessage);
             
             requestBody = buildRequestBodyWithMessages(request, messages);
-            
-            // Auto-extract TaskState after building conversation history
-            extractAndUpdateTaskState(request.getSessionId(), messages, request.getMessage());
         } else {
             // Standard flow without RAG
             requestBody = buildRequestBody(request);
-            
-            // Auto-extract TaskState after building conversation history
-            extractAndUpdateTaskState(request.getSessionId(), null, request.getMessage());
         }
         
         ChatRequest.ModelSettings requestSettings = request.getSettings();
@@ -171,9 +166,19 @@ public class AiChatService {
         // Log the request body for debugging
         logAiRequest(requestBody, 0);
 
+        ConnectionProvider connectionProvider = ConnectionProvider.builder("ai-chat-pool")
+                .maxConnections(50)
+                .pendingAcquireMaxCount(100)
+                .pendingAcquireTimeout(Duration.ofSeconds(30))
+                .build();
+        
         WebClient requestWebClient = WebClient.builder()
                 .baseUrl(baseUrl)
-                .clientConnector(new ReactorClientHttpConnector(HttpClient.create()))
+                .clientConnector(new ReactorClientHttpConnector(
+                    HttpClient.create(connectionProvider)
+                        .keepAlive(true)
+                        .responseTimeout(Duration.ofSeconds(120))
+                ))
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
 
@@ -186,13 +191,14 @@ public class AiChatService {
                 .retrieve()
                 .bodyToMono(Map.class)
                 .doOnSubscribe(subscription -> logger.info(">>> AI REQUEST (subscription): Sending to API"))
-                .flatMap(response -> handleAiResponse(response, requestBody, requestWebClient, apiKey, baseUrl, 0, finalRagResult));
+                .flatMap(response -> handleAiResponse(response, requestBody, requestWebClient, apiKey, baseUrl, 0, finalRagResult, request));
     }
 
     private Mono<ChatResponse> handleAiResponse(Map<String, Object> response, 
                                                   Map<String, Object> originalRequestBody,
                                                   WebClient webClient, String apiKey, String baseUrl,
-                                                  int recursionDepth, RagContextResult ragResult) {
+                                                  int recursionDepth, RagContextResult ragResult,
+                                                  ChatRequest request) {
         if (recursionDepth > 10) {
             return Mono.just(ChatResponse.error("Too many tool call iterations"));
         }
@@ -244,7 +250,7 @@ public class AiChatService {
                 }
                 
                 logger.info("Processing {} tool calls at depth {}", toolCalls.size(), recursionDepth);
-                return executeToolCalls(toolCalls, originalRequestBody, webClient, apiKey, baseUrl, model, usage, recursionDepth);
+                return executeToolCalls(toolCalls, originalRequestBody, webClient, apiKey, baseUrl, model, usage, recursionDepth, request);
             }
             
             // No tool calls - return response
@@ -261,6 +267,16 @@ public class AiChatService {
                 chatResponse.setSources(ragResult.getSources());
                 logger.info("RAG sources included: count={}", ragResult.getSources().size());
             }
+            // Include TaskState (goal, status, constraints, clarifications) if session exists
+            if (request.getSessionId() != null && !request.getSessionId().isEmpty()) {
+                TaskStateDTO taskState = taskStateService.getTaskState(request.getSessionId());
+                if (taskState != null) {
+                    chatResponse.setTaskState(taskState);
+                    logger.debug("TaskState included in response: goal='{}', status={}, constraints={}", 
+                        taskState.getGoal(), taskState.getStatus(), 
+                        taskState.getConstraints() != null ? taskState.getConstraints().size() : 0);
+                }
+            }
             return Mono.just(chatResponse);
             
         } catch (Exception e) {
@@ -276,7 +292,7 @@ public class AiChatService {
                                                  Map<String, Object> originalRequestBody,
                                                  WebClient webClient, String apiKey, String baseUrl,
                                                  String model, Map<String, Object> usage,
-                                                 int recursionDepth) {
+                                                 int recursionDepth, ChatRequest request) {
         List<Map<String, Object>> toolResults = new ArrayList<>();
         
         // Execute each tool call
@@ -357,7 +373,7 @@ public class AiChatService {
                 .bodyToMono(Map.class)
                 .doOnSuccess(response -> logger.info("<<< Received response from AI API (depth={})", recursionDepth + 1))
                 .doOnError(e -> logger.error(">>> AI API request failed: {}", e.getMessage()))
-                .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1, null));
+                .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1, null, request));
     }
 
     public Map<String, Object> buildDebugRequest(ChatRequest request) {
@@ -918,7 +934,11 @@ public class AiChatService {
         }
     }
 
-    private void extractAndUpdateTaskState(String sessionId, List<ChatMessageDTO> messages, String currentMessage) {
+    /**
+     * Auto-extract TaskState (Goal, Status, Constraints, Clarifications) from conversation
+     * and update database. Called after each user message to keep TaskState in sync.
+     */
+    public void extractAndUpdateTaskState(String sessionId, List<ChatMessageDTO> messages, String currentMessage) {
         if (sessionId == null || sessionId.isEmpty()) {
             logger.debug("No sessionId provided, skipping TaskState extraction");
             return;
@@ -928,9 +948,21 @@ public class AiChatService {
             TaskStateDTO currentState = taskStateService.getOrCreateTaskState(sessionId);
             logger.debug("TaskState ensured for session {}", sessionId);
 
+            // Load conversation history from database if not provided
             StringBuilder conversationHistory = new StringBuilder();
-            if (messages != null) {
+            if (messages != null && !messages.isEmpty()) {
+                // Use provided messages (from controller)
                 for (ChatMessageDTO msg : messages) {
+                    if ("system".equals(msg.getRole())) {
+                        continue;
+                    }
+                    String roleLabel = "user".equals(msg.getRole()) ? "User" : "AI";
+                    conversationHistory.append(roleLabel).append(": ").append(msg.getContent()).append("\n");
+                }
+            } else {
+                // Load from database
+                List<ChatMessageDTO> dbMessages = historyService.getSessionHistory(sessionId);
+                for (ChatMessageDTO msg : dbMessages) {
                     if ("system".equals(msg.getRole())) {
                         continue;
                     }
@@ -959,9 +991,10 @@ public class AiChatService {
             }
 
             if (result.getConstraints() != null && !result.getConstraints().isEmpty()) {
-                List<String> existingConstraintTexts = currentState.getConstraints().stream()
-                    .map(ConstraintDTO::getDescription)
-                    .toList();
+                List<String> existingConstraintTexts = currentState.getConstraints() != null ? 
+                    currentState.getConstraints().stream()
+                        .map(ConstraintDTO::getDescription)
+                        .toList() : new ArrayList<>();
                 
                 for (ConstraintDTO constraint : result.getConstraints()) {
                     if (!existingConstraintTexts.contains(constraint.getDescription())) {
@@ -975,10 +1008,19 @@ public class AiChatService {
             }
 
             if (result.getClarifications() != null && !result.getClarifications().isEmpty()) {
+                List<String> existingQuestions = currentState.getClarifications() != null ?
+                    currentState.getClarifications().stream()
+                        .map(ClarificationDTO::getQuestion)
+                        .toList() : new ArrayList<>();
+                    
                 for (ClarificationDTO clarification : result.getClarifications()) {
-                    taskStateService.addClarification(sessionId, clarification.getQuestion(), clarification.getAnswer());
-                    logger.info("TaskState clarification saved: Q='{}' A='{}'", 
-                        clarification.getQuestion(), clarification.getAnswer());
+                    if (!existingQuestions.contains(clarification.getQuestion())) {
+                        taskStateService.addClarification(sessionId, clarification.getQuestion(), clarification.getAnswer());
+                        logger.info("TaskState clarification saved: Q='{}' A='{}'", 
+                            clarification.getQuestion(), clarification.getAnswer());
+                    } else {
+                        logger.debug("Skipping duplicate clarification: Q='{}'", clarification.getQuestion());
+                    }
                 }
             }
 
