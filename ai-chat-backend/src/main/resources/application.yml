@@ -96,6 +96,8 @@ rag:
       ef-search: 50
   ollama:
     base-url: ${OLLAMA_BASE_URL:http://host.docker.internal:11434}
+    api-url: ${OLLAMA_API_URL:http://host.docker.internal:11434}
+    model: ${OLLAMA_MODEL:llama3.2}
   query-rewrite:
     enabled: ${RAG_QUERY_REWRITE_ENABLED:true}
     model: ${RAG_QUERY_REWRITE_MODEL:default-chat}

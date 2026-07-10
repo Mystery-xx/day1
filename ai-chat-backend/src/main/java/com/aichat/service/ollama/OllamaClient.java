@@ -12,6 +12,7 @@ import reactor.netty.http.client.HttpClient;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
+import java.util.List;
 
 @Service
 public class OllamaClient {
@@ -24,6 +25,7 @@ public class OllamaClient {
     private WebClient webClient;
     private static final int MAX_RETRIES = 3;
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration CHAT_TIMEOUT = Duration.ofSeconds(180);
     
     @PostConstruct
     public void init() {
@@ -89,6 +91,63 @@ public class OllamaClient {
             throw e;
         } catch (Exception e) {
             logger.error("Unexpected error during embedding generation", e);
+            throw new OllamaUnavailableException("Unexpected error: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Generate chat response using the Ollama chat API.
+     * Implements retry logic with exponential backoff (3 attempts) and 180s timeout.
+     * 
+     * @param messages the conversation messages
+     * @param model the model name to use (e.g., "llama3.2")
+     * @return OllamaChatResponse containing the AI response
+     * @throws OllamaUnavailableException if Ollama service is unreachable
+     * @throws ModelNotFoundException if the specified model is not found
+     */
+    public OllamaChatResponse chat(List<OllamaChatRequest.Message> messages, String model) {
+        OllamaChatRequest request = new OllamaChatRequest(model, messages, false);
+        
+        try {
+            OllamaChatResponse response = webClient.post()
+                .uri("/api/chat")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(OllamaChatResponse.class)
+                .timeout(CHAT_TIMEOUT)
+                .retryWhen(Retry.backoff(MAX_RETRIES, Duration.ofSeconds(1))
+                    .maxBackoff(Duration.ofSeconds(10))
+                    .transientErrors(true)
+                    .onRetryExhaustedThrow((spec, signal) -> {
+                        logger.error("Max retries ({}) exhausted for Ollama chat request", MAX_RETRIES);
+                        return new OllamaUnavailableException("Failed to connect to Ollama after " + MAX_RETRIES + " attempts");
+                    }))
+                .doOnError(throwable -> {
+                    if (throwable instanceof WebClientResponseException.NotFound) {
+                        logger.error("Model '{}' not found in Ollama", model);
+                        throw new ModelNotFoundException(model, throwable);
+                    } else if (throwable instanceof WebClientResponseException) {
+                        logger.error("Ollama API error: {}", ((WebClientResponseException) throwable).getStatusCode());
+                        throw new OllamaUnavailableException("Ollama API error: " + ((WebClientResponseException) throwable).getStatusCode());
+                    } else {
+                        logger.error("Ollama connection error: {}", throwable.getMessage());
+                        throw new OllamaUnavailableException("Failed to connect to Ollama: " + throwable.getMessage(), throwable);
+                    }
+                })
+                .block();
+            
+            if (response == null || response.getMessage() == null || response.getMessage().getContent() == null) {
+                throw new OllamaUnavailableException("Empty response from Ollama");
+            }
+            
+            return response;
+            
+        } catch (ModelNotFoundException e) {
+            throw e;
+        } catch (OllamaUnavailableException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Unexpected error during chat generation", e);
             throw new OllamaUnavailableException("Unexpected error: " + e.getMessage(), e);
         }
     }

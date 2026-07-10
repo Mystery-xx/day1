@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -42,6 +43,10 @@ import com.aichat.service.RagSearchService;
 import com.aichat.context.TaskStateContextStrategy;
 import com.aichat.service.TaskStateExtractionStrategy;
 import com.aichat.service.TaskStateService;
+import com.aichat.service.ollama.OllamaClient;
+import com.aichat.service.ollama.OllamaChatRequest;
+import com.aichat.service.ollama.OllamaChatResponse;
+import com.aichat.service.adapter.OllamaResponseAdapter;
 
 @Service
 public class AiChatService {
@@ -58,11 +63,17 @@ public class AiChatService {
     private final TaskStateContextStrategy taskStateContextStrategy;
     private final TaskStateExtractionStrategy taskStateExtractionStrategy;
     private final TaskStateService taskStateService;
+    private final OllamaClient ollamaClient;
+    private final OllamaResponseAdapter ollamaResponseAdapter;
+
+    @Value("${ollama.api-url:http://host.docker.internal:11434}")
+    private String ollamaApiUrl;
 
     public AiChatService(AiChatProperties properties, ChatHistoryService historyService,
                          ContextStrategyFactory contextStrategyFactory, McpClientService mcpClientService,
                          RagSearchService ragSearchService, TaskStateContextStrategy taskStateContextStrategy,
-                         TaskStateExtractionStrategy taskStateExtractionStrategy, TaskStateService taskStateService) {
+                         TaskStateExtractionStrategy taskStateExtractionStrategy, TaskStateService taskStateService,
+                         OllamaClient ollamaClient, OllamaResponseAdapter ollamaResponseAdapter) {
         this.properties = properties;
         this.objectMapper = new ObjectMapper();
         this.historyService = historyService;
@@ -72,6 +83,8 @@ public class AiChatService {
         this.taskStateContextStrategy = taskStateContextStrategy;
         this.taskStateExtractionStrategy = taskStateExtractionStrategy;
         this.taskStateService = taskStateService;
+        this.ollamaClient = ollamaClient;
+        this.ollamaResponseAdapter = ollamaResponseAdapter;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(120));
@@ -158,6 +171,12 @@ public class AiChatService {
         
         ChatRequest.ModelSettings requestSettings = request.getSettings();
         String provider = requestSettings != null ? requestSettings.getProvider() : properties.getProvider();
+        
+        // Handle "local" provider (Ollama) separately
+        if ("local".equalsIgnoreCase(provider)) {
+            return handleLocalProvider(request, requestBody, requestSettings, ragResult);
+        }
+        
         String baseUrl = getBaseUrlForProvider(provider);
         String apiKey = getApiKeyForProvider(provider);
         
@@ -194,6 +213,77 @@ public class AiChatService {
                 .flatMap(response -> handleAiResponse(response, requestBody, requestWebClient, apiKey, baseUrl, 0, finalRagResult, request));
     }
 
+    /**
+     * Handle "local" provider (Ollama) chat requests.
+     * Converts ChatRequest to Ollama format, calls Ollama API, and adapts response.
+     */
+    private Mono<ChatResponse> handleLocalProvider(ChatRequest request, Map<String, Object> requestBody,
+                                                    ChatRequest.ModelSettings requestSettings, RagContextResult ragResult) {
+        return Mono.fromCallable(() -> {
+            // Extract model name: from request settings or fallback to OLLAMA_MODEL env var
+            String modelName = (requestSettings != null && requestSettings.getModel() != null)
+                ? requestSettings.getModel()
+                : System.getenv("OLLAMA_MODEL");
+            
+            if (modelName == null || modelName.isEmpty()) {
+                logger.warn("No model specified for local provider, using default");
+                modelName = "llama3.2"; // Default fallback
+            }
+            
+            logger.info("Sending message to Ollama - Model: {}", modelName);
+            
+            // Convert messages from request body to Ollama format
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> messages = (List<Map<String, Object>>) requestBody.get("messages");
+            List<OllamaChatRequest.Message> ollamaMessages = convertToOllamaMessages(messages);
+            
+            // Call Ollama API
+            OllamaChatResponse ollamaResponse = ollamaClient.chat(ollamaMessages, modelName);
+            
+            // Adapt Ollama response to internal ChatResponse format
+            ChatResponse chatResponse = ollamaResponseAdapter.adapt(ollamaResponse);
+            
+            // Include RAG sources if available
+            if (ragResult != null && ragResult.getSources() != null && !ragResult.getSources().isEmpty()) {
+                chatResponse.setSources(ragResult.getSources());
+                logger.info("RAG sources included: count={}", ragResult.getSources().size());
+            }
+            
+            // Include TaskState if session exists
+            if (request.getSessionId() != null && !request.getSessionId().isEmpty()) {
+                TaskStateDTO taskState = taskStateService.getTaskState(request.getSessionId());
+                if (taskState != null) {
+                    chatResponse.setTaskState(taskState);
+                    logger.debug("TaskState included in response: goal='{}', status={}, constraints={}",
+                        taskState.getGoal(), taskState.getStatus(),
+                        taskState.getConstraints() != null ? taskState.getConstraints().size() : 0);
+                }
+            }
+            
+            return chatResponse;
+        })
+        .doOnSubscribe(subscription -> logger.info(">>> OLLAMA REQUEST (subscription): Sending to local Ollama API"))
+        .doOnSuccess(response -> logger.info("<<< OLLAMA RESPONSE: model={}, contentLength={}",
+            response.getModel(), response.getContent() != null ? response.getContent().length() : 0))
+        .onErrorResume(e -> {
+            logger.error("Error calling Ollama API", e);
+            return Mono.just(ChatResponse.error("Error calling local Ollama API: " + e.getMessage()));
+        });
+    }
+    
+    /**
+     * Convert messages from OpenAI format to Ollama format.
+     */
+    private List<OllamaChatRequest.Message> convertToOllamaMessages(List<Map<String, Object>> messages) {
+        List<OllamaChatRequest.Message> ollamaMessages = new ArrayList<>();
+        for (Map<String, Object> msg : messages) {
+            String role = (String) msg.get("role");
+            String content = (String) msg.get("content");
+            ollamaMessages.add(new OllamaChatRequest.Message(role != null ? role : "user", content != null ? content : ""));
+        }
+        return ollamaMessages;
+    }
+    
     private Mono<ChatResponse> handleAiResponse(Map<String, Object> response, 
                                                   Map<String, Object> originalRequestBody,
                                                   WebClient webClient, String apiKey, String baseUrl,
@@ -440,7 +530,10 @@ public class AiChatService {
     }
     
     private String getBaseUrlForProvider(String provider) {
-        if ("huggingface".equalsIgnoreCase(provider)) {
+        if ("local".equalsIgnoreCase(provider)) {
+            // Local provider uses Ollama directly, handled separately
+            return ollamaApiUrl;
+        } else if ("huggingface".equalsIgnoreCase(provider)) {
             return properties.getHuggingfaceUrl() != null ? properties.getHuggingfaceUrl() : properties.getUrl();
         } else {
             return properties.getGpustackUrl() != null ? properties.getGpustackUrl() : properties.getUrl();
@@ -448,7 +541,10 @@ public class AiChatService {
     }
     
     private String getApiKeyForProvider(String provider) {
-        if ("huggingface".equalsIgnoreCase(provider)) {
+        if ("local".equalsIgnoreCase(provider)) {
+            // Local provider (Ollama) doesn't require API key
+            return "";
+        } else if ("huggingface".equalsIgnoreCase(provider)) {
             String hfToken = properties.getHuggingfaceToken();
             return hfToken != null && !hfToken.isEmpty() ? hfToken : properties.getKey();
         } else {
