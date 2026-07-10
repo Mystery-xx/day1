@@ -6,6 +6,8 @@ import com.aichat.context.ContextStrategyFactory;
 import com.aichat.context.ContextStrategyType;
 import com.aichat.context.TaskStateContextStrategy;
 import com.aichat.dto.ChatRequest;
+import com.aichat.service.ollama.OllamaClient;
+import com.aichat.service.adapter.OllamaResponseAdapter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -64,6 +66,12 @@ class AiChatServiceConnectionPoolingTest {
     @Mock
     private AiChatProperties aiChatProperties;
 
+    @Mock
+    private OllamaClient ollamaClient;
+
+    @Mock
+    private OllamaResponseAdapter ollamaResponseAdapter;
+
     private AiChatService aiChatService;
 
     @BeforeEach
@@ -87,7 +95,9 @@ class AiChatServiceConnectionPoolingTest {
             ragSearchService,
             taskStateContextStrategy,
             taskStateExtractionStrategy,
-            taskStateService
+            taskStateService,
+            ollamaClient,
+            ollamaResponseAdapter
         );
     }
 
@@ -112,7 +122,9 @@ class AiChatServiceConnectionPoolingTest {
                 ragSearchService,
                 taskStateContextStrategy,
                 taskStateExtractionStrategy,
-                taskStateService
+                taskStateService,
+                ollamaClient,
+                ollamaResponseAdapter
             );
             assertNotNull(service);
             createdCount.incrementAndGet();
@@ -141,7 +153,9 @@ class AiChatServiceConnectionPoolingTest {
                         ragSearchService,
                         taskStateContextStrategy,
                         taskStateExtractionStrategy,
-                        taskStateService
+                        taskStateService,
+                        ollamaClient,
+                        ollamaResponseAdapter
                     );
                     assertNotNull(service);
                     createdCount.incrementAndGet();

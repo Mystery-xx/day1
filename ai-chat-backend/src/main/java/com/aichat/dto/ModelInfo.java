@@ -9,6 +9,8 @@ public class ModelInfo {
     private Long created;
     private String ownedBy;
     private String category;
+    private String name;
+    private Long size;
 
     public ModelInfo() {}
 
@@ -61,5 +63,21 @@ public class ModelInfo {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public Long getSize() {
+        return size;
+    }
+
+    public void setSize(Long size) {
+        this.size = size;
     }
 }

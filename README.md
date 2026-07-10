@@ -307,11 +307,53 @@ curl -X DELETE http://localhost:8082/api/rag/documents/test.md
 }
 ```
 
-### Ollama Setup
+### Local LLM with Ollama
 
-1. Install Ollama: https://ollama.ai
-2. Pull model: `ollama pull nomic-embed-text`
-3. Start Ollama: `ollama serve`
+Run AI models locally using Ollama for privacy and offline usage.
+
+**1. Install Ollama:**
+Download from https://ollama.ai/download (Windows/Mac/Linux)
+
+**2. Pull model:**
+```bash
+ollama pull llama3.2
+```
+
+**3. Start server:**
+```bash
+ollama serve
+```
+Or run as systemd service (Linux):
+```bash
+systemctl --user enable ollama
+systemctl --user start ollama
+```
+
+**4. Configure .env:**
+```bash
+AI_API_URL=http://host.docker.internal:11434
+AI_API_KEY=ollama
+AI_MODEL=llama3.2
+AI_PROVIDER=ollama
+```
+
+**5. Run Docker:**
+```bash
+docker-compose up --build
+```
+
+**GPU Verification:**
+```bash
+ollama ps
+```
+Check output shows GPU usage (e.g., "100% GPU" or GPU memory allocation).
+
+**Troubleshooting:**
+- **Ollama not running:** Ensure `ollama serve` is active, check with `ollama ps`
+- **Model not found:** Run `ollama pull llama3.2` before starting the app
+- **GPU not detected:** Verify NVIDIA drivers installed, run `nvidia-smi`
+
+Ollama should work with or without GPU, but models run faster with GPU acceleration.
 
 ### TEI Reranker Setup
 

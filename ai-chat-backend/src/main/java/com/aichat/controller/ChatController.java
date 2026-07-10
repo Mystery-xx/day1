@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Scheduler;
@@ -28,14 +29,12 @@ import reactor.core.scheduler.Schedulers;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.time.Duration;
 import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -366,7 +365,13 @@ public class ChatController {
                     return ResponseEntity.ok(models);
                 });
     }
-    
+
+    /**
+     * Get local Ollama models.
+     * Calls Ollama's /api/tags endpoint and returns models with category field.
+     * 
+     * @return List of ModelInfo with id, name, size, and category fields
+     */
     @PostMapping("/sessions/{sessionId}/duplicate")
     public ResponseEntity<List<String>> duplicateSession(
             @PathVariable String sessionId,
