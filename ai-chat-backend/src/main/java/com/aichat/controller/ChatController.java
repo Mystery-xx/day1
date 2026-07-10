@@ -23,10 +23,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
@@ -47,26 +51,74 @@ public class ChatController {
     private final StickyFactService stickyFactService;
     private final FactExtractionService factExtractionService;
     private final TaskStateService taskStateService;
+    private final ObjectMapper objectMapper;
 
     public ChatController(AiChatService chatService, ChatHistoryService historyService,
                           StickyFactService stickyFactService, FactExtractionService factExtractionService,
-                          TaskStateService taskStateService) {
+                          TaskStateService taskStateService, ObjectMapper objectMapper) {
         this.chatService = chatService;
         this.historyService = historyService;
         this.stickyFactService = stickyFactService;
         this.factExtractionService = factExtractionService;
         this.taskStateService = taskStateService;
+        this.objectMapper = objectMapper;
     }
 
     @PostMapping
     public Mono<ResponseEntity<ChatResponse>> sendMessage(@RequestBody ChatRequest request) {
         logger.info("Received chat request");
         return chatService.sendMessage(request)
-                .map(response -> {
+                .publishOn(Schedulers.boundedElastic())
+                .flatMap(response -> {
                     if (response.getError() != null) {
-                        return ResponseEntity.internalServerError().body(response);
+                        return Mono.just(ResponseEntity.internalServerError().body(response));
                     }
-                    return ResponseEntity.ok(response);
+                    
+                    // Save messages and extract TaskState BEFORE returning response
+                    String sessionId = request.getSessionId();
+                    if (sessionId != null && !sessionId.isEmpty() && response.getContent() != null) {
+                        // Save user message
+                        historyService.saveMessage(
+                            sessionId,
+                            "user",
+                            request.getMessage(),
+                            null, null, null, null,
+                            null,
+                            request.getSettings() != null ? request.getSettings().getProvider() : null,
+                            request.getSettings() != null ? request.getSettings().getTemperature() : null,
+                            request.getSettings() != null ? request.getSettings().getMaxTokens() : null
+                        );
+                        
+                        // Save assistant response
+                        Integer responseTime = (int) (System.currentTimeMillis() - System.currentTimeMillis());
+                        Map<String, Object> usage = response.getUsage();
+                        Integer promptTokens = usage != null ? (Integer) usage.get("prompt_tokens") : null;
+                        Integer completionTokens = usage != null ? (Integer) usage.get("completion_tokens") : null;
+                        Integer totalTokens = usage != null ? (Integer) usage.get("total_tokens") : null;
+                        
+                        historyService.saveMessage(
+                            sessionId,
+                            "assistant",
+                            response.getContent(),
+                            response.getModel(),
+                            promptTokens,
+                            completionTokens,
+                            totalTokens,
+                            responseTime,
+                            request.getSettings() != null ? request.getSettings().getProvider() : null,
+                            request.getSettings() != null ? request.getSettings().getTemperature() : null,
+                            request.getSettings() != null ? request.getSettings().getMaxTokens() : null
+                        );
+                        
+                        // Extract TaskState with full conversation context
+                        chatService.extractAndUpdateTaskState(sessionId, null, null);
+                        
+                        // Reload TaskState and add to response
+                        TaskStateDTO taskState = taskStateService.getTaskState(sessionId);
+                        response.setTaskState(taskState);
+                    }
+                    
+                    return Mono.just(ResponseEntity.ok(response));
                 });
     }
 
@@ -83,8 +135,7 @@ public class ChatController {
         
         final String finalSessionId = sessionId;
         
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS);
+        
         
         return Flux.create(emitter -> {
             try {
@@ -92,7 +143,7 @@ public class ChatController {
                 Map<String, Object> debugRequest = chatService.buildDebugRequest(request);
                 
                 logger.debug("Emitting debug request immediately: {}", debugRequest);
-                String debugRequestJson = mapper.writeValueAsString(Map.of(
+                String debugRequestJson = objectMapper.writeValueAsString(Map.of(
                     "type", "debugRequest", 
                     "data", debugRequest,
                     "sessionId", finalSessionId
@@ -119,7 +170,7 @@ public class ChatController {
                                             toolCallEvent.put("type", "toolCall");
                                             toolCallEvent.put("data", toolCall);
                                             toolCallEvent.put("sessionId", finalSessionId);
-                                            String toolCallJson = mapper.writeValueAsString(toolCallEvent);
+                                            String toolCallJson = objectMapper.writeValueAsString(toolCallEvent);
                                             emitter.next(toolCallJson);
                                             logger.debug("Emitted toolCall event: {}", toolCall.get("function"));
                                         } catch (JsonProcessingException e) {
@@ -136,7 +187,7 @@ public class ChatController {
                                             toolResultEvent.put("type", "toolResult");
                                             toolResultEvent.put("data", toolResult);
                                             toolResultEvent.put("sessionId", finalSessionId);
-                                            String toolResultJson = mapper.writeValueAsString(toolResultEvent);
+                                            String toolResultJson = objectMapper.writeValueAsString(toolResultEvent);
                                             emitter.next(toolResultJson);
                                             logger.debug("Emitted toolResult event: {}", toolResult.get("name"));
                                         } catch (JsonProcessingException e) {
@@ -172,10 +223,10 @@ public class ChatController {
                                     String toolResultsJson = null;
                                     try {
                                         if (response.getToolCalls() != null && !response.getToolCalls().isEmpty()) {
-                                            toolCallsJson = mapper.writeValueAsString(response.getToolCalls());
+                                            toolCallsJson = objectMapper.writeValueAsString(response.getToolCalls());
                                         }
                                         if (response.getToolResults() != null && !response.getToolResults().isEmpty()) {
-                                            toolResultsJson = mapper.writeValueAsString(response.getToolResults());
+                                            toolResultsJson = objectMapper.writeValueAsString(response.getToolResults());
                                         }
                                     } catch (JsonProcessingException e) {
                                         logger.warn("Failed to serialize tool call metadata", e);
@@ -224,10 +275,14 @@ public class ChatController {
                                     // Flag to indicate sticky facts may have been updated (for auto-extraction)
                                     // Frontend should refresh if this flag is true or if facts changed
                                     response.setStickyFactsUpdated(true);
+                                    
+                                    // Auto-extract TaskState (Goal, Status, Constraints, Clarifications) from full conversation
+                                    // This is called AFTER saving both user and assistant messages to capture complete dialogue context
+                                    chatService.extractAndUpdateTaskState(sessionIdForSave, null, null);
                                 }
                                 
                                 // Send full ChatResponse with debug fields + sessionId
-                                String responseJson = mapper.writeValueAsString(Map.of(
+                                String responseJson = objectMapper.writeValueAsString(Map.of(
                                     "type", "response", 
                                     "data", response,
                                     "sessionId", sessionIdForSave
@@ -241,7 +296,7 @@ public class ChatController {
                         error -> {
                             try {
                                 logger.error("Error in streaming call", error);
-                                String errorJson = mapper.writeValueAsString(Map.of(
+                                String errorJson = objectMapper.writeValueAsString(Map.of(
                                     "type", "error", 
                                     "data", Map.of("error", error.getMessage()),
                                     "sessionId", sessionIdForSave
