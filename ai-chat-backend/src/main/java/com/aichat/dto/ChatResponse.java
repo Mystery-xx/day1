@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Map;
 import java.util.List;
+import com.aichat.dto.TaskStateDTO;
 
 public class ChatResponse {
     private String content;
@@ -47,6 +48,10 @@ public class ChatResponse {
     @JsonProperty("sources")
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private List<SourceInfo> sources;
+
+    @JsonProperty("taskState")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private TaskStateDTO taskState;
 
     public ChatResponse() {}
 
@@ -196,5 +201,13 @@ public class ChatResponse {
 
     public void setSources(List<SourceInfo> sources) {
         this.sources = sources;
+    }
+
+    public TaskStateDTO getTaskState() {
+        return taskState;
+    }
+
+    public void setTaskState(TaskStateDTO taskState) {
+        this.taskState = taskState;
     }
 }

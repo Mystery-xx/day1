@@ -776,6 +776,68 @@ public class RagController {
     }
 
     /**
+     * Get list of all indexed documents.
+     * Returns sorted list of document sources (file names or URLs).
+     * 
+     * @return list of document sources
+     */
+    @GetMapping("/documents")
+    @Operation(
+        summary = "List indexed documents",
+        description = "Get a sorted list of all document sources currently indexed in RAG."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "List of documents retrieved successfully",
+            content = @Content(
+                mediaType = "application/json",
+                examples = @ExampleObject(
+                    name = "Success",
+                    summary = "Document list",
+                    value = """
+                        [
+                          "task-management-guide.md",
+                          "weather.md",
+                          "Золотой ключик или Приключения Буратино.txt",
+                          "Толстой Алексей Константинович.txt"
+                        ]
+                        """
+                )
+            )
+        ),
+        @ApiResponse(
+            responseCode = "500",
+            description = "Internal server error - failed to get document list",
+            content = @Content(
+                mediaType = "application/json",
+                examples = @ExampleObject(
+                    name = "Error",
+                    summary = "Failed to retrieve documents",
+                    value = """
+                        {
+                          "error": "Failed to get documents: ..."
+                        }
+                        """
+                )
+            )
+        )
+    })
+    public ResponseEntity<List<String>> getDocuments() {
+        logger.info("Received documents list request");
+        
+        try {
+            List<String> documents = storageService.getAllSources();
+            logger.debug("Documents list: {}", documents);
+            return ResponseEntity.ok(documents);
+            
+        } catch (Exception e) {
+            logger.error("Failed to get documents list", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
      * Health check endpoint for RAG services.
      * Returns the status of the TEI reranker service.
      * 

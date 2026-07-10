@@ -327,6 +327,19 @@ public class VectorStorageService implements AutoCloseable {
     }
     
     /**
+     * Get list of all unique document sources in storage.
+     * @return list of source identifiers (file names or URLs)
+     */
+    public List<String> getAllSources() {
+        return vectors.values().stream()
+            .map(v -> v.chunk != null ? v.chunk.getSource() : null)
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted()
+            .collect(Collectors.toList());
+    }
+    
+    /**
      * Get the total number of chunks in storage.
      * @return count of chunks
      */

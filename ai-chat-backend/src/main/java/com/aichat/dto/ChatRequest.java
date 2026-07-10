@@ -1,5 +1,7 @@
 package com.aichat.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.util.List;
 import java.util.Map;
 
@@ -105,6 +107,7 @@ public class ChatRequest {
         this.settings = settings;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ModelSettings {
         private String provider;
         private String model;

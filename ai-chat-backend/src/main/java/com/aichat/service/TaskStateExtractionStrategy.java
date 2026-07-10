@@ -180,7 +180,7 @@ public class TaskStateExtractionStrategy {
      */
     private String buildExtractionPrompt(String context) {
         return """
-            Ты - экстрактор состояния задачи. Проанализируй диалог и верни ТОЛЬКО JSON.
+            Ты - экстрактор состояния задачи. Проанализируй диалог и верни JSON.
             
             ПРАВИЛА РАЗДЕЛЕНИЯ GOAL и CONSTRAINTS:
             - GOAL: ЧТО пользователь хочет создать/построить/спроектировать (основная цель)
@@ -188,32 +188,12 @@ public class TaskStateExtractionStrategy {
             
             ВАЖНО: НЕ включай ограничения в goal! Выноси их в отдельный массив constraints.
             
-            Пример 1 (русский):
-            Пользователь: "Спроектируй микросервисную архитектуру для интернет-магазина. Не используй монолит, только Java и Spring Boot."
-            
-            Правильный ответ:
+            ФОРМАТ ОТВЕТА (начни с {"goal": и закончи }):
             {
-              "goal": "Спроектируй микросервисную архитектуру для интернет-магазина",
-              "status": "CLARIFYING",
-              "constraints": [
-                {"type": "TECHNICAL", "description": "Не используй монолит", "isViolated": false},
-                {"type": "TECHNICAL", "description": "Только Java и Spring Boot", "isViolated": false}
-              ],
-              "clarifications": []
-            }
-            
-            Пример 2 (английский):
-            User: "Create a React component for login. Don't use TypeScript, only use PostgreSQL."
-            
-            Correct answer:
-            {
-              "goal": "Create a React component for login",
-              "status": "CLARIFYING", 
-              "constraints": [
-                {"type": "TECHNICAL", "description": "Don't use TypeScript", "isViolated": false},
-                {"type": "TECHNICAL", "description": "Only use PostgreSQL", "isViolated": false}
-              ],
-              "clarifications": []
+              "goal": "текст цели",
+              "status": "CLARIFYING|PLANNING|EXECUTING|DONE",
+              "constraints": [{"type": "TECHNICAL", "description": "текст", "isViolated": false}],
+              "clarifications": [{"question": "вопрос", "answer": "ответ"}]
             }
             
             Status definitions:
@@ -228,7 +208,7 @@ public class TaskStateExtractionStrategy {
             Диалог для анализа:
             %s
             
-            Верни ТОЛЬКО JSON, без markdown, без объяснений.
+            НАЧНИ ОТВЕТ С {"goal": - это критично! Без markdown, без объяснений перед JSON.
             """.formatted(context);
     }
 
@@ -244,7 +224,7 @@ public class TaskStateExtractionStrategy {
                 java.util.Map.of("role", "user", "content", prompt)
             ),
             "temperature", 0.3,
-            "max_tokens", 1000
+            "max_tokens", 3000  // Increased for reasoning models (need ~2000 for reasoning + ~500 for JSON)
         );
     }
 
@@ -296,44 +276,116 @@ public class TaskStateExtractionStrategy {
     
     /**
      * Извлекает JSON объект из текста (ищет JSON с полем "goal").
+     * Reasoning модели пишут рассуждение, потом JSON в конце.
      */
     private String extractJsonFromText(String text) {
         if (text == null || text.isEmpty()) {
             return text;
         }
         
-        // Ищем JSON который начинается с {"goal": или {"status":
-        int start = text.indexOf("{\"goal\":");
-        if (start == -1) {
-            start = text.indexOf("{\"status\":");
+        // Step 0: Try to find JSON in "Construct JSON" block (reasoning models often put final JSON there)
+        // Look for pattern: ```json\n{...}\n``` or just {...} after "Construct JSON:"
+        int constructJsonIndex = text.toLowerCase().indexOf("construct json");
+        if (constructJsonIndex != -1) {
+            // Search for JSON after this marker
+            String afterMarker = text.substring(constructJsonIndex);
+            int braceStart = afterMarker.indexOf('{');
+            if (braceStart != -1) {
+                // Find matching closing brace
+                int braceCount = 0;
+                int end = -1;
+                for (int i = braceStart; i < afterMarker.length(); i++) {
+                    char c = afterMarker.charAt(i);
+                    if (c == '{') {
+                        braceCount++;
+                    } else if (c == '}') {
+                        braceCount--;
+                        if (braceCount == 0) {
+                            end = i + 1;
+                            break;
+                        }
+                    }
+                }
+                if (end != -1) {
+                    return afterMarker.substring(braceStart, end);
+                }
+            }
         }
+        
+        // Step 1: Remove markdown code block wrappers (```json ... ```)
+        // AI often wraps JSON in markdown, which breaks parsing
+        String cleanedText = text.trim();
+        if (cleanedText.startsWith("```json")) {
+            cleanedText = cleanedText.substring(7).trim();
+        } else if (cleanedText.startsWith("```")) {
+            cleanedText = cleanedText.substring(3).trim();
+        }
+        if (cleanedText.endsWith("```")) {
+            cleanedText = cleanedText.substring(0, cleanedText.length() - 3).trim();
+        }
+        
+        // Step 2: Remove stray backticks inside JSON (AI artifact from reasoning models)
+        // Example: {"goal":`? Yes.} → {"goal": "Yes."}
+        cleanedText = cleanedText.replace("`", "");
+        
+        // Step 3: Find JSON object boundaries using key field positions
+        int start = -1;
+        
+        // Find last occurrence of JSON key fields (goal, status, constraints)
+        int lastGoal = cleanedText.lastIndexOf("\"goal\":");
+        int lastStatus = cleanedText.lastIndexOf("\"status\":");
+        int lastConstraints = cleanedText.lastIndexOf("\"constraints\":");
+        
+        // Find position after the last key field
+        int lastKey = Math.max(lastGoal, Math.max(lastStatus, lastConstraints));
+        if (lastKey != -1) {
+            // Search for '{' before this key field
+            int braceBefore = cleanedText.lastIndexOf('{', lastKey);
+            if (braceBefore != -1 && braceBefore < lastKey) {
+                start = braceBefore;
+            }
+        }
+        
+        // Fallback: search for last '{' if key fields not found
         if (start == -1) {
-            // Fallback: ищем первую '{'
-            start = text.indexOf('{');
+            start = cleanedText.lastIndexOf('{');
         }
         
         if (start == -1) {
-            return text;
+            logger.warn("No JSON object found in text");
+            return cleanedText;
         }
         
-        // Считаем скобки чтобы найти правильный конец
+        // Step 4: Extract complete JSON object by counting braces
         int braceCount = 0;
         int end = start;
         
-        for (int i = start; i < text.length(); i++) {
-            char c = text.charAt(i);
+        for (int i = start; i < cleanedText.length(); i++) {
+            char c = cleanedText.charAt(i);
             if (c == '{') {
                 braceCount++;
             } else if (c == '}') {
                 braceCount--;
                 if (braceCount == 0) {
-                    end = i;
+                    end = i + 1; // Include closing brace
                     break;
                 }
             }
         }
         
-        String json = text.substring(start, end + 1);
+        if (braceCount != 0) {
+            logger.warn("Unclosed JSON object - braceCount={}", braceCount);
+            // Try to find the last closing brace
+            int lastBrace = cleanedText.lastIndexOf('}', cleanedText.length() - 1);
+            if (lastBrace > start) {
+                end = lastBrace + 1;
+            } else {
+                end = cleanedText.length();
+            }
+        }
+        
+        // Extract only the JSON part, discard everything after closing brace
+        String json = cleanedText.substring(start, end);
         logger.debug("Extracted JSON from text (length={}): {}...", json.length(), json.substring(0, Math.min(80, json.length())));
         return json;
     }
