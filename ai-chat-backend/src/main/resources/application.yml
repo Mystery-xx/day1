@@ -37,7 +37,7 @@ ai:
     huggingface-token: ${HUGGINGFACE_TOKEN:}
     model: ${AI_MODEL:}
     temperature: ${AI_TEMPERATURE:0.7}
-    max-tokens: ${AI_MAX_TOKENS:1024}
+    max-tokens: ${AI_MAX_TOKENS:4096}
     top-p: ${AI_TOP_P:1.0}
     frequency-penalty: ${AI_FREQUENCY_PENALTY:0.0}
     presence-penalty: ${AI_PRESENCE_PENALTY:0.0}

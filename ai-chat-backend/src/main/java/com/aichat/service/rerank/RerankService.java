@@ -35,7 +35,7 @@ public class RerankService {
 
     private WebClient webClient;
 
-    private static final Duration TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
     @PostConstruct
     public void init() {

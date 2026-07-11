@@ -13,9 +13,10 @@ services:
       - GPUSTACK_API_URL=${GPUSTACK_API_URL:-}
       - HUGGINGFACE_API_URL=${HUGGINGFACE_API_URL:-}
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://localhost:11434}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - RAG_OLLAMA_BASE_URL=${RAG_OLLAMA_BASE_URL:-http://ollama:11434}
       - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Djava.io.flushonnewline=true
     ports:
       - "8082:8082"
@@ -57,6 +58,29 @@ services:
         limits:
           memory: 9G
 
+  ollama:
+    image: ollama/ollama:0.5.4
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - ai-chat-network
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_VULKAN=false
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 networks:
   ai-chat-network:
     driver: bridge
@@ -64,3 +88,4 @@ networks:
 volumes:
   h2-data:
   rag-index:
+  ollama-data:

@@ -116,6 +116,14 @@ function App() {
   }, [settings])
 
   useEffect(() => {
+    if (settings.provider === 'local') {
+      setSettings(prev => ({ ...prev, maxTokens: 4096 }))
+    } else {
+      setSettings(prev => ({ ...prev, maxTokens: 16384 }))
+    }
+  }, [settings.provider])
+
+  useEffect(() => {
     let cancelled = false
     const provider = settings.provider
 

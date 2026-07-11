@@ -10,7 +10,7 @@ services:
     container_name: ai-chat-backend-8081
     environment:
       - SERVER_PORT=8081
-      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://localhost:11434}
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
     ports:
       - "8081:8081"
@@ -49,9 +49,32 @@ services:
         limits:
           memory: 9G
 
+  ollama:
+    image: ollama/ollama:0.5.4
+    container_name: ollama-8081
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama-data-8081:/root/.ollama
+    networks:
+      - ai-chat-network-8081
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 networks:
   ai-chat-network-8081:
     driver: bridge
 
 volumes:
   h2-data-8081:
+  ollama-data-8081:
