@@ -29,7 +29,7 @@ function App() {
     const defaults = {
       provider: 'gpustack',
       model: 'qwen3.5-397b-a17b',
-      temperature: 1.0,
+      temperature: 0.6,
       maxTokens: 16384,
       topP: 1.0,
       frequencyPenalty: 0.0,
