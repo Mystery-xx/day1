@@ -13,6 +13,10 @@ WORKDIR /app
 
 COPY --from=build /app/target/*.jar app.jar
 
+RUN groupadd -r aichat && useradd -r -g aichat aichat
+RUN chown -R aichat:aichat /app
+USER aichat
+
 ENV LANG=C.UTF-8
 ENV JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8"
 

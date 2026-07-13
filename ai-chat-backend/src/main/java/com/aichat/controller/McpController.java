@@ -3,15 +3,23 @@ package com.aichat.controller;
 import com.aichat.entity.McpServerConfig;
 import com.aichat.repository.McpServerRepository;
 import com.aichat.service.McpClientService;
+import com.aichat.service.SecurityAuditLogger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.spec.McpSchema;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import reactor.core.publisher.Flux;
 
+import java.net.InetAddress;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.UnknownHostException;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -27,10 +35,14 @@ public class McpController {
 
     private final McpServerRepository serverRepository;
     private final McpClientService mcpClientService;
+    private final SecurityAuditLogger securityAuditLogger;
 
-    public McpController(McpServerRepository serverRepository, McpClientService mcpClientService) {
+    public McpController(McpServerRepository serverRepository, 
+                        McpClientService mcpClientService,
+                        SecurityAuditLogger securityAuditLogger) {
         this.serverRepository = serverRepository;
         this.mcpClientService = mcpClientService;
+        this.securityAuditLogger = securityAuditLogger;
     }
 
     @GetMapping("/servers")
@@ -60,6 +72,16 @@ public class McpController {
         }
         if (serverConfig.getTransportType() == null || serverConfig.getTransportType().isBlank()) {
             return ResponseEntity.badRequest().build();
+        }
+        
+        // SSRF prevention: validate URL before saving
+        String validationResult = validateMcpUrl(serverConfig.getUrl());
+        if (validationResult != null) {
+            String clientIp = securityAuditLogger.getClientIp();
+            securityAuditLogger.logSsrfAttempt(serverConfig.getUrl(), validationResult, clientIp);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", validationResult);
+            return ResponseEntity.status(403).body(null);
         }
         
         LocalDateTime now = LocalDateTime.now();
@@ -201,6 +223,85 @@ public class McpController {
         }
         
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Validates MCP server URL to prevent SSRF attacks.
+     * Returns null if valid, or error message if blocked.
+     */
+    private String validateMcpUrl(String urlString) {
+        if (urlString == null || urlString.isBlank()) {
+            return "URL is required";
+        }
+
+        URL url;
+        try {
+            url = new URL(urlString);
+        } catch (MalformedURLException e) {
+            return "Invalid URL format";
+        }
+
+        // Only allow HTTP and HTTPS schemes
+        String protocol = url.getProtocol().toLowerCase();
+        if (!"http".equals(protocol) && !"https".equals(protocol)) {
+            return "Only HTTP and HTTPS schemes are allowed";
+        }
+
+        String host = url.getHost().toLowerCase();
+        
+        // Block hostnames ending with .internal
+        if (host.endsWith(".internal")) {
+            return "Internal hostnames (.internal) are not allowed";
+        }
+
+        // Resolve hostname to IP address
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(host);
+        } catch (UnknownHostException e) {
+            return "Unable to resolve hostname";
+        }
+
+        // Block AWS metadata endpoint
+        if ("169.254.169.254".equals(address.getHostAddress())) {
+            return "AWS metadata endpoint is not allowed";
+        }
+
+        // Block loopback, link-local, site-local, any-local addresses
+        if (address.isLoopbackAddress()) {
+            return "Loopback addresses are not allowed";
+        }
+        if (address.isLinkLocalAddress()) {
+            return "Link-local addresses are not allowed";
+        }
+        if (address.isSiteLocalAddress()) {
+            return "Site-local (private) addresses are not allowed";
+        }
+        if (address.isAnyLocalAddress()) {
+            return "Any-local addresses are not allowed";
+        }
+
+        // Block common internal ports
+        int port = url.getPort();
+        if (port == -1) {
+            port = "https".equals(protocol) ? 443 : 80;
+        }
+        
+        if (port < 1024) {
+            return "Privileged ports (<1024) are not allowed";
+        }
+        if (port == 6379 || port == 27017 || port == 5432 || port == 3306) {
+            return "Database ports (6379, 27017, 5432, 3306) are not allowed";
+        }
+
+        return null; // Valid URL
+    }
+
+    /**
+     * Get client IP address from request context.
+     */
+    private String getClientIp() {
+        return securityAuditLogger.getClientIp();
     }
 
     @GetMapping(value = "/servers/{id}/tools", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

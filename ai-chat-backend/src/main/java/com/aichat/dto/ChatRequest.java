@@ -1,12 +1,18 @@
 package com.aichat.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 
 import java.util.List;
 import java.util.Map;
 
+@Valid
 public class ChatRequest {
     private String sessionId;
+    @NotBlank(message = "Message is required")
+    @Size(max = 4000, message = "Message too long (max 4000 characters)")
     private String message;
     private Boolean useRag = false;
     private Boolean useRerank = false;

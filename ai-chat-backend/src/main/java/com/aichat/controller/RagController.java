@@ -8,8 +8,10 @@ import com.aichat.dto.rag.UploadResponse;
 import com.aichat.dto.rerank.RerankRequest;
 import com.aichat.dto.rerank.RerankResponse;
 import com.aichat.dto.rerank.RerankedDocument;
+import com.aichat.service.FileUploadValidator;
 import com.aichat.service.RagIndexingService;
 import com.aichat.service.RagSearchService;
+import com.aichat.service.SecurityAuditLogger;
 import com.aichat.service.chunking.ChunkingType;
 import com.aichat.service.query.QueryRewriteService;
 import com.aichat.service.rerank.RerankService;
@@ -32,11 +34,14 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 
 import jakarta.annotation.PostConstruct;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * REST controller for RAG (Retrieval-Augmented Generation) operations.
@@ -59,15 +64,20 @@ public class RagController {
     private final RerankService rerankService;
     private final QueryRewriteService queryRewriteService;
     private final RagSearchService ragSearchService;
+    private final SecurityAuditLogger auditLogger;
+    private final FileUploadValidator fileUploadValidator;
 
     public RagController(RagIndexingService indexingService, VectorStorageService storageService,
                         RerankService rerankService, QueryRewriteService queryRewriteService,
-                        RagSearchService ragSearchService) {
+                        RagSearchService ragSearchService, SecurityAuditLogger auditLogger,
+                        FileUploadValidator fileUploadValidator) {
         this.indexingService = indexingService;
         this.storageService = storageService;
         this.rerankService = rerankService;
         this.queryRewriteService = queryRewriteService;
         this.ragSearchService = ragSearchService;
+        this.auditLogger = auditLogger;
+        this.fileUploadValidator = fileUploadValidator;
     }
 
     @PostConstruct
@@ -168,8 +178,80 @@ public class RagController {
             )
             @RequestParam(value = "strategy", defaultValue = "SEMANTIC") ChunkingType strategy) {
         
+        String filename = file.getOriginalFilename();
+        long fileSize = file.getSize();
+        String clientIp = auditLogger.getClientIp();
+        
         logger.info("Received file upload request: filename={}, size={}, strategy={}", 
-            file.getOriginalFilename(), file.getSize(), strategy);
+            filename, fileSize, strategy);
+
+        // Validation 1: Check file is not empty
+        if (file.isEmpty()) {
+            logger.warn("Upload rejected: empty file");
+            auditLogger.logInvalidFileUpload("empty file", filename, fileSize, clientIp);
+            UploadResponse response = UploadResponse.error(
+                filename != null ? filename : "unknown",
+                "File is empty"
+            );
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        // Validation 2: Check file size <= 10MB
+        if (fileSize > FileUploadValidator.MAX_FILE_SIZE) {
+            logger.warn("Upload rejected: file too large ({} bytes)", fileSize);
+            auditLogger.logInvalidFileUpload("file too large", filename, fileSize, clientIp);
+            UploadResponse response = UploadResponse.error(
+                filename != null ? filename : "unknown",
+                "File size exceeds 10MB limit"
+            );
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        // Validation 3: Validate filename extension (.txt or .md only)
+        String extension = getFileExtension(filename);
+        if (!FileUploadValidator.ALLOWED_EXTENSIONS.contains(extension.toLowerCase())) {
+            logger.warn("Upload rejected: invalid extension '{}' for file '{}'", extension, filename);
+            auditLogger.logInvalidFileUpload("invalid extension", filename, fileSize, clientIp);
+            UploadResponse response = UploadResponse.error(
+                filename != null ? filename : "unknown",
+                "Invalid file extension. Only .txt and .md are allowed"
+            );
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        // Validation 4: Validate content type
+        String contentType = file.getContentType();
+        if (!isValidContentType(contentType)) {
+            logger.warn("Upload rejected: invalid content type '{}'", contentType);
+            auditLogger.logInvalidFileUpload("invalid content type", filename, fileSize, clientIp);
+            UploadResponse response = UploadResponse.error(
+                filename != null ? filename : "unknown",
+                "Invalid content type. Only text/plain, text/markdown, text/x-markdown, application/json are allowed"
+            );
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        // Validation 5: Validate file content (no binary data)
+        if (!isValidTextContent(file)) {
+            logger.warn("Upload rejected: binary content detected");
+            auditLogger.logInvalidFileUpload("binary content", filename, fileSize, clientIp);
+            UploadResponse response = UploadResponse.error(
+                filename != null ? filename : "unknown",
+                "File contains binary data. Only text files are allowed"
+            );
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        // Validation 6: Validate strategy parameter
+        if (strategy != ChunkingType.SEMANTIC && strategy != ChunkingType.FIXED_SIZE) {
+            logger.warn("Upload rejected: invalid strategy '{}'", strategy);
+            auditLogger.logInvalidFileUpload("invalid strategy", filename, fileSize, clientIp);
+            UploadResponse response = UploadResponse.error(
+                filename != null ? filename : "unknown",
+                "Invalid strategy. Only SEMANTIC or FIXED_SIZE are allowed"
+            );
+            return ResponseEntity.badRequest().body(response);
+        }
 
         try {
             IndexResult result = indexingService.index(file, strategy);
@@ -996,5 +1078,70 @@ public class RagController {
 
         List<RerankedDocument> results = rerankService.rerank(query, documents, topN);
         return ResponseEntity.ok(results);
+    }
+
+    private String getFileExtension(String filename) {
+        if (filename == null || filename.isEmpty()) {
+            return "";
+        }
+        int lastDotIndex = filename.lastIndexOf('.');
+        if (lastDotIndex < 0 || lastDotIndex == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(lastDotIndex);
+    }
+
+    private boolean isValidContentType(String contentType) {
+        if (contentType == null || contentType.isEmpty()) {
+            return false;
+        }
+        String normalized = contentType.toLowerCase();
+        return normalized.equals("text/plain") ||
+               normalized.equals("text/markdown") ||
+               normalized.equals("text/x-markdown") ||
+               normalized.equals("application/json");
+    }
+
+    private boolean isValidTextContent(MultipartFile file) {
+        try (InputStream inputStream = file.getInputStream()) {
+            byte[] buffer = new byte[8192];
+            int totalBytes = 0;
+            int nonPrintableCount = 0;
+            int nullByteCount = 0;
+            
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                totalBytes += bytesRead;
+                for (int i = 0; i < bytesRead; i++) {
+                    byte b = buffer[i];
+                    if (b == 0) {
+                        nullByteCount++;
+                    }
+                    if (b < 32 && b != 9 && b != 10 && b != 13) {
+                        nonPrintableCount++;
+                    }
+                }
+                if (totalBytes > 1024) {
+                    double nullRatio = (double) nullByteCount / totalBytes;
+                    double nonPrintableRatio = (double) nonPrintableCount / totalBytes;
+                    if (nullRatio > 0.01 || nonPrintableRatio > 0.3) {
+                        return false;
+                    }
+                }
+            }
+            
+            if (totalBytes == 0) {
+                return true;
+            }
+            
+            double nullRatio = (double) nullByteCount / totalBytes;
+            double nonPrintableRatio = (double) nonPrintableCount / totalBytes;
+            
+            return nullRatio <= 0.01 && nonPrintableRatio <= 0.3;
+            
+        } catch (IOException e) {
+            logger.warn("Failed to validate file content", e);
+            return false;
+        }
     }
 }

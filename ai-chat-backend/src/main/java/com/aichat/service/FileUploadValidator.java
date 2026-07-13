@@ -20,8 +20,8 @@ public class FileUploadValidator {
     
     private static final Logger logger = LoggerFactory.getLogger(FileUploadValidator.class);
     
-    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(".txt", ".md");
+    public static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    public static final Set<String> ALLOWED_EXTENSIONS = Set.of(".txt", ".md");
     private static final Charset REQUIRED_ENCODING = StandardCharsets.UTF_8;
     
     /**

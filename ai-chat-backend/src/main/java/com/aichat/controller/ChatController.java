@@ -1,5 +1,6 @@
 package com.aichat.controller;
 
+import com.aichat.annotation.RateLimit;
 import com.aichat.dto.ChatRequest;
 import com.aichat.dto.ChatResponse;
 import com.aichat.dto.ModelInfo;
@@ -11,13 +12,18 @@ import com.aichat.dto.TaskStateDTO;
 import com.aichat.dto.ConstraintDTO;
 import com.aichat.dto.ClarificationDTO;
 import com.aichat.entity.TaskStatus;
+import com.aichat.exception.RateLimitExceededException;
 import com.aichat.service.AiChatService;
 import com.aichat.service.ChatHistoryService;
 import com.aichat.service.StickyFactService;
 import com.aichat.service.FactExtractionService;
+import com.aichat.service.SecurityAuditLogger;
 import com.aichat.service.TaskStateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import jakarta.validation.Valid;
+import org.springframework.validation.BindingResult;
+import org.springframework.validation.FieldError;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -35,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.stream.Collectors;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -50,22 +57,37 @@ public class ChatController {
     private final StickyFactService stickyFactService;
     private final FactExtractionService factExtractionService;
     private final TaskStateService taskStateService;
+    private final SecurityAuditLogger securityAuditLogger;
     private final ObjectMapper objectMapper;
 
     public ChatController(AiChatService chatService, ChatHistoryService historyService,
                           StickyFactService stickyFactService, FactExtractionService factExtractionService,
-                          TaskStateService taskStateService, ObjectMapper objectMapper) {
+                          TaskStateService taskStateService, SecurityAuditLogger securityAuditLogger,
+                          ObjectMapper objectMapper) {
         this.chatService = chatService;
         this.historyService = historyService;
         this.stickyFactService = stickyFactService;
         this.factExtractionService = factExtractionService;
         this.taskStateService = taskStateService;
+        this.securityAuditLogger = securityAuditLogger;
         this.objectMapper = objectMapper;
     }
 
     @PostMapping
-    public Mono<ResponseEntity<ChatResponse>> sendMessage(@RequestBody ChatRequest request) {
+    @RateLimit(requests = 5, seconds = 60)
+    public Mono<ResponseEntity<ChatResponse>> sendMessage(@Valid @RequestBody ChatRequest request, BindingResult bindingResult) {
         logger.info("Received chat request");
+
+        if (bindingResult.hasErrors()) {
+            String clientIp = securityAuditLogger.getClientIp();
+            bindingResult.getFieldErrors().forEach(error ->
+                securityAuditLogger.logInputValidationFailure(error.getDefaultMessage(), error.getField(), clientIp));
+            String errors = bindingResult.getFieldErrors().stream()
+                .map(error -> error.getDefaultMessage())
+                .collect(Collectors.joining(", "));
+            return Mono.just(ResponseEntity.badRequest().body(new ChatResponse(null, errors)));
+        }
+
         return chatService.sendMessage(request)
                 .publishOn(Schedulers.boundedElastic())
                 .flatMap(response -> {
@@ -567,5 +589,13 @@ public class ChatController {
         logger.info("Deleting task state for session: {}", sessionId);
         taskStateService.deleteTaskState(sessionId);
         return ResponseEntity.noContent().build();
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ChatResponse> handleRateLimitExceeded(RateLimitExceededException ex) {
+        String clientIp = securityAuditLogger.getClientIp();
+        securityAuditLogger.logRateLimitExceeded("/api/chat", clientIp, "5 requests per 60 seconds");
+        logger.warn("Rate limit exceeded for IP={}", clientIp);
+        return ResponseEntity.status(429).body(new ChatResponse(null, ex.getMessage()));
     }
 }
