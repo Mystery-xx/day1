@@ -1,0 +1,26 @@
+{
+  "name": "day1-assistant-mcp",
+  "version": "1.0.0",
+  "description": "Unified MCP server for day1 project assistant tools",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "mcp": "node dist/index.js",
+    "dev": "tsc --watch",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "latest",
+    "zod": "^4.2.0",
+    "simple-git": "^3.27.0",
+    "fuse.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "eslint": "^9.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0"
+  }
+}

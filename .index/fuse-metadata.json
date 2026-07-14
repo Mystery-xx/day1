@@ -1,0 +1,66 @@
+{
+  "indexedAt": "2026-07-14T21:33:31.762Z",
+  "documentCount": 12,
+  "documents": [
+    {
+      "path": "README.md",
+      "lastModified": "2026-07-12T00:07:52.752Z",
+      "title": "AI Chat Application"
+    },
+    {
+      "path": "test-documents/01-project-overview.md",
+      "lastModified": "2026-07-05T21:13:12.939Z",
+      "title": "AI Chat Project Overview"
+    },
+    {
+      "path": "test-documents/02-mcp-setup-guide.md",
+      "lastModified": "2026-07-05T21:13:23.131Z",
+      "title": "MCP Setup Guide"
+    },
+    {
+      "path": "test-documents/03-api-reference.md",
+      "lastModified": "2026-07-05T21:13:38.543Z",
+      "title": "API Reference"
+    },
+    {
+      "path": "test-documents/04-environment-variables.md",
+      "lastModified": "2026-07-05T21:13:52.648Z",
+      "title": "Environment Variables Guide"
+    },
+    {
+      "path": "test-documents/05-docker-deployment.md",
+      "lastModified": "2026-07-05T21:14:10.490Z",
+      "title": "Docker Deployment Guide"
+    },
+    {
+      "path": "test-documents/06-rag-architecture.md",
+      "lastModified": "2026-07-05T21:14:32.843Z",
+      "title": "RAG Architecture"
+    },
+    {
+      "path": "test-documents/07-context-strategies.md",
+      "lastModified": "2026-07-05T21:14:50.899Z",
+      "title": "Context Management Strategies"
+    },
+    {
+      "path": "test-documents/08-troubleshooting.md",
+      "lastModified": "2026-07-05T21:15:10.805Z",
+      "title": "Troubleshooting Guide"
+    },
+    {
+      "path": "test-documents/09-model-settings.md",
+      "lastModified": "2026-07-05T21:15:33.618Z",
+      "title": "Model Settings Guide"
+    },
+    {
+      "path": "test-documents/10-security-guide.md",
+      "lastModified": "2026-07-05T21:15:57.909Z",
+      "title": "Security Guide"
+    },
+    {
+      "path": "test-documents/11-reranking-guide.md",
+      "lastModified": "2026-07-07T12:55:53.856Z",
+      "title": "Reranking Guide"
+    }
+  ]
+}
