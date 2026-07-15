@@ -7,9 +7,12 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.client.transport.ServerParameters;
+import io.modelcontextprotocol.client.transport.StdioClientTransport;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -41,8 +44,12 @@ public class McpSessionClient {
     private final WebClient webClient;
 
     private final ConcurrentHashMap<String, McpSyncClient> clients = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, HttpClientStreamableHttpTransport> transports = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, HttpClientStreamableHttpTransport> httpTransports = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, StdioClientTransport> stdioTransports = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    
+    @Autowired(required = false)
+    private StdioMcpTransport stdioTransport;
 
     public McpSessionClient() {
         this.webClient = WebClient.builder()
@@ -52,7 +59,51 @@ public class McpSessionClient {
                 .build();
     }
 
+    public SessionInfo initialize(String serverId, String baseUrl, String transportType) {
+        if ("STDIO".equalsIgnoreCase(transportType)) {
+            return initializeStdio(serverId);
+        } else {
+            return initializeHttp(serverId, baseUrl);
+        }
+    }
+    
     public SessionInfo initialize(String serverId, String baseUrl) {
+        // Default to HTTP for backward compatibility
+        return initializeHttp(serverId, baseUrl);
+    }
+    
+    private SessionInfo initializeStdio(String serverId) {
+        logger.info(">>> MCP REQUEST [initialize] to stdio server {}", serverId);
+        
+        try {
+            if (stdioTransport == null) {
+                logger.error("StdioTransport not available");
+                return new SessionInfo(false, null, "Stdio transport not available");
+            }
+            
+            StdioClientTransport transport = stdioTransport.getTransport(Long.parseLong(serverId));
+            if (transport == null) {
+                logger.error("Stdio transport not found for server {}", serverId);
+                return new SessionInfo(false, null, "Stdio transport not found");
+            }
+            
+            McpSyncClient client = McpClient.sync(transport).build();
+            client.initialize();
+            
+            logger.info("<<< MCP RESPONSE [initialize] from stdio server {} - SUCCESS", serverId);
+            
+            clients.put(serverId, client);
+            stdioTransports.put(serverId, transport);
+            
+            return new SessionInfo(true, serverId, "Connected");
+            
+        } catch (Exception e) {
+            logger.error("<<< MCP RESPONSE [initialize] from stdio server {} - ERROR: {}", serverId, e.getMessage());
+            return new SessionInfo(false, null, "Error: " + e.getMessage());
+        }
+    }
+    
+    private SessionInfo initializeHttp(String serverId, String baseUrl) {
         logger.info(">>> MCP REQUEST [initialize] to server {} at {}", serverId, baseUrl);
         logger.debug("Initialize request: protocolVersion=2024-11-05, capabilities={{}}, clientInfo={name=test, version=1.0}");
         
@@ -70,7 +121,7 @@ public class McpSessionClient {
             logger.info("MCP client initialized successfully");
             
             clients.put(serverId, client);
-            transports.put(serverId, transport);
+            httpTransports.put(serverId, transport);
             
             return new SessionInfo(true, serverId, "Connected");
             
@@ -333,7 +384,8 @@ public class McpSessionClient {
                 logger.warn("Error closing session: {}", e.getMessage());
             }
         }
-        transports.remove(serverId);
+        httpTransports.remove(serverId);
+        stdioTransports.remove(serverId);
     }
 
     public boolean isConnected(String serverId) {

@@ -5,6 +5,7 @@ import com.aichat.repository.McpServerRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -24,6 +25,9 @@ public class McpClientService {
 
     private final ConcurrentHashMap<Long, ConnectionStatus> connectionStates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, List<McpSessionClient.ToolInfo>> toolCache = new ConcurrentHashMap<>();
+    
+    @Autowired(required = false)
+    private StdioMcpTransport stdioTransport;
 
     public McpClientService(McpServerRepository serverRepository, McpSessionClient sessionClient) {
         this.serverRepository = serverRepository;
@@ -51,22 +55,55 @@ public class McpClientService {
         try {
             connectionStates.put(serverConfig.getId(), ConnectionStatus.CONNECTING);
             
+            // Start stdio process if needed
+            if ("STDIO".equalsIgnoreCase(serverConfig.getTransportType())) {
+                if (stdioTransport == null) {
+                    logger.error("Stdio transport not available");
+                    connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
+                    return new ConnectionResult(false, "Stdio transport not available", List.of());
+                }
+                
+                StdioMcpTransport.TransportResult result = stdioTransport.startServer(
+                    serverConfig.getId(),
+                    serverConfig.getCommand(),
+                    serverConfig.getWorkingDirectory()
+                );
+                
+                if (!result.success()) {
+                    logger.error("Failed to start stdio server: {}", result.error());
+                    connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
+                    return new ConnectionResult(false, result.error(), List.of());
+                }
+            }
+            
+            // Initialize session (McpSessionClient routes based on transportType)
             McpSessionClient.SessionInfo sessionInfo = sessionClient.initialize(
                 serverConfig.getId().toString(), 
-                serverConfig.getUrl()
+                serverConfig.getUrl(),
+                serverConfig.getTransportType()
             );
             
             if (!sessionInfo.isConnected()) {
                 logger.warn("Failed to initialize MCP server {}: {}", serverConfig.getName(), sessionInfo.getMessage());
                 connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
+                
+                // Clean up stdio process on failure
+                if ("STDIO".equalsIgnoreCase(serverConfig.getTransportType()) && stdioTransport != null) {
+                    stdioTransport.stopServer(serverConfig.getId());
+                }
+                
                 return new ConnectionResult(false, sessionInfo.getMessage(), List.of());
             }
             
             connectionStates.put(serverConfig.getId(), ConnectionStatus.CONNECTED);
             
+            // Get URL for listing tools (null for stdio, actual URL for HTTP)
+            String toolsUrl = "HTTP".equalsIgnoreCase(serverConfig.getTransportType()) 
+                ? serverConfig.getUrl() : null;
+            
             List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
                 serverConfig.getId().toString(),
-                serverConfig.getUrl()
+                toolsUrl
             );
             
             // Cache tools for fast lookup
@@ -90,6 +127,12 @@ public class McpClientService {
         } catch (Exception e) {
             logger.error("Failed to connect to MCP server {}: {}", serverConfig.getName(), e.getMessage(), e);
             connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
+            
+            // Clean up stdio process on failure
+            if ("STDIO".equalsIgnoreCase(serverConfig.getTransportType()) && stdioTransport != null) {
+                stdioTransport.stopServer(serverConfig.getId());
+            }
+            
             String errorMsg = formatErrorMessageForController(e);
             return new ConnectionResult(false, errorMsg, List.of());
         }
@@ -103,6 +146,11 @@ public class McpClientService {
         logger.info("Disconnecting from MCP server (id={})", serverId);
         
         try {
+            // Stop stdio process if running
+            if (stdioTransport != null) {
+                stdioTransport.stopServer(serverId);
+            }
+            
             sessionClient.closeSession(serverId.toString());
             connectionStates.put(serverId, ConnectionStatus.DISCONNECTED);
             toolCache.remove(serverId);  // Clear tool cache
@@ -125,9 +173,12 @@ public class McpClientService {
             throw new IllegalStateException("Not connected to MCP server: " + serverId);
         }
         
+        String toolsUrl = "HTTP".equalsIgnoreCase(serverConfig.getTransportType()) 
+            ? serverConfig.getUrl() : null;
+        
         List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
             serverId.toString(),
-            serverConfig.getUrl()
+            toolsUrl
         );
         
         return tools.stream()
@@ -152,9 +203,12 @@ public class McpClientService {
         logger.info(">>> MCP TOOL CALL [{}] on server {} (id={})", toolName, serverConfig.getName(), serverId);
         logger.debug("Tool arguments: {}", arguments);
         
+        String toolsUrl = "HTTP".equalsIgnoreCase(serverConfig.getTransportType()) 
+            ? serverConfig.getUrl() : null;
+        
         McpSessionClient.ToolCallResult result = sessionClient.callTool(
             serverId.toString(),
-            serverConfig.getUrl(),
+            toolsUrl,
             toolName,
             arguments
         );
@@ -224,9 +278,12 @@ public class McpClientService {
                     continue;
                 }
                 
+                String toolsUrl = "HTTP".equalsIgnoreCase(config.getTransportType()) 
+                    ? config.getUrl() : null;
+                
                 List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
                     serverId.toString(),
-                    config.getUrl()
+                    toolsUrl
                 );
                 
                 logger.info("Collecting {} tools from server [{}] (id={})", 

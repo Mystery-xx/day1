@@ -67,21 +67,37 @@ public class McpController {
         if (serverConfig.getName() == null || serverConfig.getName().isBlank()) {
             return ResponseEntity.badRequest().build();
         }
-        if (serverConfig.getUrl() == null || serverConfig.getUrl().isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
         if (serverConfig.getTransportType() == null || serverConfig.getTransportType().isBlank()) {
             return ResponseEntity.badRequest().build();
         }
         
-        // SSRF prevention: validate URL before saving
-        String validationResult = validateMcpUrl(serverConfig.getUrl());
-        if (validationResult != null) {
-            String clientIp = securityAuditLogger.getClientIp();
-            securityAuditLogger.logSsrfAttempt(serverConfig.getUrl(), validationResult, clientIp);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", validationResult);
-            return ResponseEntity.status(403).body(null);
+        String transportType = serverConfig.getTransportType();
+        if ("HTTP".equalsIgnoreCase(transportType)) {
+            if (serverConfig.getUrl() == null || serverConfig.getUrl().isBlank()) {
+                return ResponseEntity.badRequest().build();
+            }
+            String validationResult = validateMcpUrl(serverConfig.getUrl());
+            if (validationResult != null) {
+                String clientIp = securityAuditLogger.getClientIp();
+                securityAuditLogger.logSsrfAttempt(serverConfig.getUrl(), validationResult, clientIp);
+                Map<String, String> errorResponse = new HashMap<>();
+                errorResponse.put("error", validationResult);
+                return ResponseEntity.status(403).body(null);
+            }
+        } else if ("STDIO".equalsIgnoreCase(transportType)) {
+            if (serverConfig.getCommand() == null || serverConfig.getCommand().isBlank()) {
+                return ResponseEntity.badRequest().build();
+            }
+            if (serverConfig.getWorkingDirectory() != null && !serverConfig.getWorkingDirectory().isBlank()) {
+                java.io.File dir = new java.io.File(serverConfig.getWorkingDirectory());
+                if (!dir.exists() || !dir.isDirectory()) {
+                    Map<String, String> errorResponse = new HashMap<>();
+                    errorResponse.put("error", "Working directory does not exist");
+                    return ResponseEntity.status(400).body(null);
+                }
+            }
+        } else {
+            return ResponseEntity.badRequest().build();
         }
         
         LocalDateTime now = LocalDateTime.now();
@@ -105,6 +121,8 @@ public class McpController {
                     existingServer.setName(serverConfig.getName());
                     existingServer.setUrl(serverConfig.getUrl());
                     existingServer.setTransportType(serverConfig.getTransportType());
+                    existingServer.setCommand(serverConfig.getCommand());
+                    existingServer.setWorkingDirectory(serverConfig.getWorkingDirectory());
                     existingServer.setUpdatedAt(LocalDateTime.now());
                     
                     McpServerConfig updated = serverRepository.save(existingServer);

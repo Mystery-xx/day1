@@ -17,11 +17,20 @@ public class McpServerConfig {
     @Column(nullable = false, length = 255)
     private String name;
     
-    @Column(nullable = false, length = 500)
+    @Column(length = 500)
     private String url;
     
     @Column(name = "transport_type", nullable = false, length = 50)
     private String transportType;
+    
+    @Column(length = 500)
+    private String command;
+    
+    @Column(name = "working_directory", length = 500)
+    private String workingDirectory;
+    
+    @Column(length = 50)
+    private String status;
     
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
@@ -30,6 +39,7 @@ public class McpServerConfig {
     private LocalDateTime updatedAt;
     
     public McpServerConfig() {
+        this.status = "active";
     }
     
     // Getters and Setters
@@ -64,6 +74,30 @@ public class McpServerConfig {
     
     public void setTransportType(String transportType) {
         this.transportType = transportType;
+    }
+    
+    public String getCommand() {
+        return command;
+    }
+    
+    public void setCommand(String command) {
+        this.command = command;
+    }
+    
+    public String getWorkingDirectory() {
+        return workingDirectory;
+    }
+    
+    public void setWorkingDirectory(String workingDirectory) {
+        this.workingDirectory = workingDirectory;
+    }
+    
+    public String getStatus() {
+        return status;
+    }
+    
+    public void setStatus(String status) {
+        this.status = status;
     }
     
     public LocalDateTime getCreatedAt() {
