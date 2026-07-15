@@ -199,23 +199,38 @@ day1/
 ├── ai-chat-backend/          # Spring Boot backend
 │   ├── src/main/java/com/aichat/
 │   │   ├── controller/       # REST controllers
-│   │   ├── service/          # Business logic
+│   │   ├── service/          # Business logic (8 sub-packages)
 │   │   ├── entity/           # JPA entities
 │   │   └── config/           # Configuration
 │   ├── pom.xml               # Maven dependencies
 │   └── Dockerfile
 ├── ai-chat-frontend/         # React frontend
 │   ├── src/
-│   │   ├── components/       # React components
+│   │   ├── components/       # React components (includes rag/)
 │   │   ├── hooks/            # Custom hooks
 │   │   └── App.jsx           # Main application
 │   ├── package.json          # NPM dependencies
 │   └── Dockerfile
-├── docker-compose.yml        # Default deployment
-├── docker-compose-8081.yml   # Alternative deployment
+├── mcp-assistant/            # MCP SDK assistant (stdio transport)
+│   └── src/                  # TypeScript, strict mode
+├── docker-compose.yml        # Default deployment (8082)
+├── docker-compose-8081.yml   # Alternative deployment (8081)
+├── docker-compose-8085.yml   # Minimal deployment (8085)
 ├── .env.example              # Environment template
 ├── .env                      # Environment config (gitignored)
-└── AGENTS.md                 # This file
+└── AGENTS.md                 # This file (root)
+
+## Hierarchical AGENTS.md Files
+
+This project uses hierarchical AGENTS.md files for domain-specific guidance:
+
+| Location | Scope |
+|----------|-------|
+| `./AGENTS.md` | Root - Docker orchestration, multi-module overview |
+| `ai-chat-backend/src/main/java/com/aichat/AGENTS.md` | Backend - Spring Boot patterns, package structure |
+| `ai-chat-backend/src/main/java/com/aichat/service/AGENTS.md` | Service layer - 8 sub-packages, strategy patterns |
+| `ai-chat-frontend/src/AGENTS.md` | Frontend - React 18, Vite, RAG components |
+| `mcp-assistant/src/AGENTS.md` | MCP Assistant - MCP SDK, stdio transport |
 ```
 
 ## Branches
