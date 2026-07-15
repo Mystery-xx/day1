@@ -472,13 +472,15 @@ ADD COLUMN status VARCHAR(50) DEFAULT 'active';
 
 ## Rollout
 
-1. Update entity + DB migration
-2. Create `StdioMcpTransport` service
-3. Update `McpSessionClient` for dual transport
-4. Update `McpClientService` routing
-5. Update `McpController` validation
-6. Test both HTTP and stdio
-7. Deploy
+- [x] Update entity + DB migration
+- [x] Create `StdioMcpTransport` service
+- [x] Update `McpSessionClient` for dual transport
+- [x] Update `McpClientService` routing
+- [x] Update `McpController` validation
+- [x] Test both HTTP and stdio
+- [x] Deploy
+
+**COMPLETED**: All 6 implementation steps done. Committed in 7981119.
 
 ## Ready to Execute
 

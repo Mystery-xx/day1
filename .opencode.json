@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "assistant": {
+      "type": "local",
+      "command": ["npm", "run", "mcp:assistant"],
+      "cwd": "/mnt/f/git/day1/mcp-assistant"
+    }
+  }
+}
