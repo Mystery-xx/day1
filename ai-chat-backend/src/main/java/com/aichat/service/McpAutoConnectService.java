@@ -20,8 +20,8 @@ public class McpAutoConnectService {
     private static final Logger logger = LoggerFactory.getLogger(McpAutoConnectService.class);
 
     private static final String ASSISTANT_SERVER_NAME = "mcp-assistant";
-    private static final String ASSISTANT_COMMAND = "npm run mcp:assistant";
-    private static final String ASSISTANT_WORKING_DIR = "/mnt/f/git/day1/mcp-assistant";
+    private static final String ASSISTANT_URL = "http://mcp-assistant:3000/mcp";
+    private static final String ASSISTANT_TRANSPORT_TYPE = "HTTP";
 
     private final McpServerRepository serverRepository;
     private final McpClientService mcpClientService;
@@ -45,12 +45,11 @@ public class McpAutoConnectService {
                 assistantConfig = existing.get();
                 logger.info("MCP Auto-Connect: Found existing assistant server with id={}", assistantConfig.getId());
             } else {
-                // Create new server config
+                // Create new server config for HTTP transport
                 assistantConfig = new McpServerConfig();
                 assistantConfig.setName(ASSISTANT_SERVER_NAME);
-                assistantConfig.setTransportType("STDIO");
-                assistantConfig.setCommand(ASSISTANT_COMMAND);
-                assistantConfig.setWorkingDirectory(ASSISTANT_WORKING_DIR);
+                assistantConfig.setTransportType(ASSISTANT_TRANSPORT_TYPE);
+                assistantConfig.setUrl(ASSISTANT_URL);
                 assistantConfig.setStatus("active");
 
                 LocalDateTime now = LocalDateTime.now();
@@ -58,7 +57,7 @@ public class McpAutoConnectService {
                 assistantConfig.setUpdatedAt(now);
 
                 assistantConfig = serverRepository.save(assistantConfig);
-                logger.info("MCP Auto-Connect: Created new assistant server with id={}", assistantConfig.getId());
+                logger.info("MCP Auto-Connect: Created new HTTP assistant server with id={}", assistantConfig.getId());
             }
 
             // Connect to assistant

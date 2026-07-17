@@ -167,3 +167,7 @@ The complete tool calling cycle involves these steps:
 - **Tool Not Found**: Ensure the MCP server is connected before calling tools
 - **Transport Error**: Verify the transportType matches the server's actual protocol
 - **Authentication Failure**: Include necessary credentials in the MCP server configuration
+
+
+## Test Addition
+This is a test addition for incremental update testing.

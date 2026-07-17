@@ -21,6 +21,7 @@ public class McpClientService {
 
     private final McpServerRepository serverRepository;
     private final McpSessionClient sessionClient;
+    private final McpHttpService mcpHttpService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final ConcurrentHashMap<Long, ConnectionStatus> connectionStates = new ConcurrentHashMap<>();
@@ -29,9 +30,10 @@ public class McpClientService {
     @Autowired(required = false)
     private StdioMcpTransport stdioTransport;
 
-    public McpClientService(McpServerRepository serverRepository, McpSessionClient sessionClient) {
+    public McpClientService(McpServerRepository serverRepository, McpSessionClient sessionClient, McpHttpService mcpHttpService) {
         this.serverRepository = serverRepository;
         this.sessionClient = sessionClient;
+        this.mcpHttpService = mcpHttpService;
     }
 
     public ConnectionResult connectToServer(Long serverId) {
@@ -74,37 +76,71 @@ public class McpClientService {
                     connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
                     return new ConnectionResult(false, result.error(), List.of());
                 }
-            }
-            
-            // Initialize session (McpSessionClient routes based on transportType)
-            McpSessionClient.SessionInfo sessionInfo = sessionClient.initialize(
-                serverConfig.getId().toString(), 
-                serverConfig.getUrl(),
-                serverConfig.getTransportType()
-            );
-            
-            if (!sessionInfo.isConnected()) {
-                logger.warn("Failed to initialize MCP server {}: {}", serverConfig.getName(), sessionInfo.getMessage());
-                connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
                 
-                // Clean up stdio process on failure
-                if ("STDIO".equalsIgnoreCase(serverConfig.getTransportType()) && stdioTransport != null) {
+                // Initialize stdio session
+                McpSessionClient.SessionInfo sessionInfo = sessionClient.initialize(
+                    serverConfig.getId().toString(), 
+                    null,
+                    "STDIO"
+                );
+                
+                if (!sessionInfo.isConnected()) {
+                    logger.warn("Failed to initialize MCP server {}: {}", serverConfig.getName(), sessionInfo.getMessage());
+                    connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
                     stdioTransport.stopServer(serverConfig.getId());
+                    return new ConnectionResult(false, sessionInfo.getMessage(), List.of());
                 }
                 
-                return new ConnectionResult(false, sessionInfo.getMessage(), List.of());
+            } else if ("HTTP".equalsIgnoreCase(serverConfig.getTransportType())) {
+                // Use mcpHttpService for initialization (handles Accept headers correctly)
+                logger.info("Using HTTP service for MCP server: {}", serverConfig.getName());
+                
+                McpHttpService.InitializeResult initResult = mcpHttpService.initialize(serverConfig.getUrl());
+                
+                if (!initResult.isSuccess()) {
+                    logger.error("Failed to initialize HTTP MCP server {}: {}", serverConfig.getName(), initResult.getMessage());
+                    connectionStates.put(serverConfig.getId(), ConnectionStatus.ERROR);
+                    return new ConnectionResult(false, initResult.getMessage(), List.of());
+                }
+                
+                // Manually store client in map for tool calls (avoids SDK Accept header issue)
+                sessionClient.storeHttpClient(serverConfig.getId().toString(), serverConfig.getUrl());
+                
+                logger.info("HTTP MCP session stored successfully for server: {}", serverConfig.getName());
             }
             
             connectionStates.put(serverConfig.getId(), ConnectionStatus.CONNECTED);
             
-            // Get URL for listing tools (null for stdio, actual URL for HTTP)
-            String toolsUrl = "HTTP".equalsIgnoreCase(serverConfig.getTransportType()) 
-                ? serverConfig.getUrl() : null;
-            
-            List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
-                serverConfig.getId().toString(),
-                toolsUrl
-            );
+            // List tools using appropriate client based on transport type
+            List<McpSessionClient.ToolInfo> tools;
+            if ("HTTP".equalsIgnoreCase(serverConfig.getTransportType())) {
+                // Use direct HTTP client for tools listing
+                McpHttpService.ToolsListResult toolsResult = mcpHttpService.listTools(serverConfig.getUrl());
+                if (!toolsResult.isSuccess()) {
+                    logger.warn("Failed to list tools from HTTP MCP server: {}", toolsResult.getError());
+                    tools = new ArrayList<>();
+                } else {
+                    tools = toolsResult.getTools().stream()
+                        .map(t -> {
+                            McpSessionClient.ToolInfo toolInfo = new McpSessionClient.ToolInfo();
+                            toolInfo.setName(t.getName());
+                            toolInfo.setDescription(t.getDescription());
+                            try {
+                                toolInfo.setParameters(objectMapper.writeValueAsString(t.getInputSchema()));
+                            } catch (Exception e) {
+                                logger.warn("Failed to serialize tool parameters for {}: {}", t.getName(), e.getMessage());
+                                toolInfo.setParameters("{}");
+                            }
+                            return toolInfo;
+                        })
+                        .toList();
+                }
+                logger.info("Listed {} tools from HTTP MCP server '{}'", tools.size(), serverConfig.getName());
+            } else {
+                // Use session client for stdio transport
+                String toolsUrl = null;
+                tools = sessionClient.listTools(serverConfig.getId().toString(), toolsUrl);
+            }
             
             // Cache tools for fast lookup
             toolCache.put(serverConfig.getId(), tools);
@@ -173,13 +209,34 @@ public class McpClientService {
             throw new IllegalStateException("Not connected to MCP server: " + serverId);
         }
         
-        String toolsUrl = "HTTP".equalsIgnoreCase(serverConfig.getTransportType()) 
-            ? serverConfig.getUrl() : null;
-        
-        List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
-            serverId.toString(),
-            toolsUrl
-        );
+        List<McpSessionClient.ToolInfo> tools;
+        if ("HTTP".equalsIgnoreCase(serverConfig.getTransportType())) {
+            // Use mcpHttpService for listing tools (handles Accept headers correctly)
+            McpHttpService.ToolsListResult toolsResult = mcpHttpService.listTools(serverConfig.getUrl());
+            if (!toolsResult.isSuccess()) {
+                logger.warn("Failed to list tools from HTTP server {}: {}", serverConfig.getName(), toolsResult.getError());
+                return new ArrayList<>();
+            }
+            tools = toolsResult.getTools().stream()
+                .map(t -> {
+                    McpSessionClient.ToolInfo toolInfo = new McpSessionClient.ToolInfo();
+                    toolInfo.setName(t.getName());
+                    toolInfo.setDescription(t.getDescription());
+                    try {
+                        toolInfo.setParameters(objectMapper.writeValueAsString(t.getInputSchema()));
+                    } catch (Exception e) {
+                        logger.warn("Failed to serialize tool parameters for {}: {}", t.getName(), e.getMessage());
+                        toolInfo.setParameters("{}");
+                    }
+                    return toolInfo;
+                })
+                .toList();
+            logger.info("Listed {} tools from HTTP server {}", tools.size(), serverConfig.getName());
+        } else {
+            // Use session client for stdio transport
+            String toolsUrl = null;
+            tools = sessionClient.listTools(serverId.toString(), toolsUrl);
+        }
         
         return tools.stream()
             .map(t -> {
@@ -203,21 +260,55 @@ public class McpClientService {
         logger.info(">>> MCP TOOL CALL [{}] on server {} (id={})", toolName, serverConfig.getName(), serverId);
         logger.debug("Tool arguments: {}", arguments);
         
-        String toolsUrl = "HTTP".equalsIgnoreCase(serverConfig.getTransportType()) 
-            ? serverConfig.getUrl() : null;
-        
-        McpSessionClient.ToolCallResult result = sessionClient.callTool(
-            serverId.toString(),
-            toolsUrl,
-            toolName,
-            arguments
-        );
-        
-        logger.info("<<< MCP TOOL RESULT [{}] - success={}, contentLength={}", 
-            toolName, result.isSuccess(), result.getContent() != null ? result.getContent().length() : 0);
-        logger.debug("Tool result content: {}", result.getContent());
-        
-        return new ToolCallResult(result.isSuccess(), result.getContent(), null);
+        try {
+            if ("HTTP".equalsIgnoreCase(serverConfig.getTransportType())) {
+                // Use mcpHttpService for tool calls - execute in new thread to avoid blocking reactor
+                final java.util.concurrent.atomic.AtomicReference<McpHttpService.ToolCallResult> resultRef = 
+                    new java.util.concurrent.atomic.AtomicReference<>();
+                final java.util.concurrent.atomic.AtomicReference<Exception> errorRef = 
+                    new java.util.concurrent.atomic.AtomicReference<>();
+                
+                Thread thread = new Thread(() -> {
+                    try {
+                        resultRef.set(mcpHttpService.callTool(serverConfig.getUrl(), toolName, arguments));
+                    } catch (Exception e) {
+                        errorRef.set(e);
+                    }
+                });
+                thread.start();
+                thread.join(30000);
+                
+                if (errorRef.get() != null) {
+                    throw errorRef.get();
+                }
+                
+                McpHttpService.ToolCallResult result = resultRef.get();
+                
+                logger.info("<<< MCP TOOL RESULT [{}] - success={}, contentLength={}", 
+                    toolName, result.isSuccess(), result.getContent() != null ? result.getContent().length() : 0);
+                logger.debug("Tool result content: {}", result.getContent());
+                
+                return new ToolCallResult(result.isSuccess(), result.getContent(), null);
+            } else {
+                // Use session client for stdio transport
+                String toolsUrl = null;
+                McpSessionClient.ToolCallResult result = sessionClient.callTool(
+                    serverId.toString(),
+                    toolsUrl,
+                    toolName,
+                    arguments
+                );
+                
+                logger.info("<<< MCP TOOL RESULT [{}] - success={}, contentLength={}", 
+                    toolName, result.isSuccess(), result.getContent() != null ? result.getContent().length() : 0);
+                logger.debug("Tool result content: {}", result.getContent());
+                
+                return new ToolCallResult(result.isSuccess(), result.getContent(), null);
+            }
+        } catch (Exception e) {
+            logger.error("Tool call failed: {}", toolName, e);
+            return new ToolCallResult(false, "Tool call failed: " + e.getMessage(), null);
+        }
     }
 
     public ToolCallResult callTool(String toolName, Map<String, Object> arguments) {
@@ -268,26 +359,51 @@ public class McpClientService {
         List<Map<String, Object>> allTools = new ArrayList<>();
         int serverCount = 0;
         
+        logger.info("getToolDefinitionsForAI: checking {} servers in connectionStates", connectionStates.size());
+        
         // Collect tools from ALL connected servers
         for (Map.Entry<Long, ConnectionStatus> entry : connectionStates.entrySet()) {
+            logger.info("getToolDefinitionsForAI: server {} status={}", entry.getKey(), entry.getValue());
             if (entry.getValue() == ConnectionStatus.CONNECTED) {
                 serverCount++;
                 Long serverId = entry.getKey();
                 McpServerConfig config = serverRepository.findById(serverId).orElse(null);
                 if (config == null) {
+                    logger.warn("getToolDefinitionsForAI: config not found for server {}", serverId);
                     continue;
                 }
                 
-                String toolsUrl = "HTTP".equalsIgnoreCase(config.getTransportType()) 
-                    ? config.getUrl() : null;
+                logger.info("getToolDefinitionsForAI: processing HTTP server {} with URL {}", config.getName(), config.getUrl());
                 
-                List<McpSessionClient.ToolInfo> tools = sessionClient.listTools(
-                    serverId.toString(),
-                    toolsUrl
-                );
-                
-                logger.info("Collecting {} tools from server [{}] (id={})", 
-                    tools.size(), config.getName(), serverId);
+                List<McpSessionClient.ToolInfo> tools;
+                if ("HTTP".equalsIgnoreCase(config.getTransportType())) {
+                    // Use direct HTTP client for HTTP transport
+                    McpHttpService.ToolsListResult toolsResult = mcpHttpService.listTools(config.getUrl());
+                    if (!toolsResult.isSuccess()) {
+                        logger.warn("Failed to list tools from HTTP server {}: {}", config.getName(), toolsResult.getError());
+                        continue;
+                    }
+                    tools = toolsResult.getTools().stream()
+                        .map(t -> {
+                            McpSessionClient.ToolInfo toolInfo = new McpSessionClient.ToolInfo();
+                            toolInfo.setName(t.getName());
+                            toolInfo.setDescription(t.getDescription());
+                            try {
+                                toolInfo.setParameters(objectMapper.writeValueAsString(t.getInputSchema()));
+                            } catch (Exception e) {
+                                logger.warn("Failed to serialize tool parameters for {}: {}", t.getName(), e.getMessage());
+                                toolInfo.setParameters("{}");
+                            }
+                            return toolInfo;
+                        })
+                        .toList();
+                    logger.info("Collected {} tools from HTTP server [{}] (id={})", tools.size(), config.getName(), serverId);
+                } else {
+                    // Use session client for stdio transport
+                    String toolsUrl = null;
+                    tools = sessionClient.listTools(serverId.toString(), toolsUrl);
+                    logger.info("Collecting {} tools from server [{}] (id={})", tools.size(), config.getName(), serverId);
+                }
                 
                 for (McpSessionClient.ToolInfo tool : tools) {
                     Map<String, Object> aiTool = new HashMap<>();

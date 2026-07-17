@@ -87,7 +87,7 @@ public class AiChatService {
         this.ollamaResponseAdapter = ollamaResponseAdapter;
         
         HttpClient httpClient = HttpClient.create()
-                .responseTimeout(Duration.ofSeconds(120));
+                .responseTimeout(Duration.ofSeconds(300)); // 5 minutes for tool calling
         
         this.webClient = WebClient.builder()
                 .baseUrl(properties.getProviderBaseUrl())
@@ -379,91 +379,96 @@ public class AiChatService {
     }
 
     private Mono<ChatResponse> executeToolCalls(List<Map<String, Object>> toolCalls,
-                                                 Map<String, Object> originalRequestBody,
-                                                 WebClient webClient, String apiKey, String baseUrl,
-                                                 String model, Map<String, Object> usage,
-                                                 int recursionDepth, ChatRequest request) {
+                                                  Map<String, Object> originalRequestBody,
+                                                  WebClient webClient, String apiKey, String baseUrl,
+                                                  String model, Map<String, Object> usage,
+                                                  int recursionDepth, ChatRequest request) {
         List<Map<String, Object>> toolResults = new ArrayList<>();
         
-        // Execute each tool call
-        for (Map<String, Object> toolCall : toolCalls) {
-            try {
-                String toolCallId = (String) toolCall.get("id");
-                Map<String, Object> function = (Map<String, Object>) toolCall.get("function");
-                String toolName = (String) function.get("name");
-                String argumentsStr = (String) function.get("arguments");
-                
-                logger.info("Executing tool: {} with args: {}", toolName, argumentsStr);
-                
-                // Parse arguments
-                Map<String, Object> arguments = objectMapper.readValue(argumentsStr, Map.class);
-                
-                // Execute tool via MCP
-                McpClientService.ToolCallResult result = mcpClientService.callTool(toolName, arguments);
-                
-                // Build tool result message
-                Map<String, Object> toolResult = new HashMap<>();
-                toolResult.put("role", "tool");
-                toolResult.put("tool_call_id", toolCallId);
-                toolResult.put("name", toolName);
-                toolResult.put("content", result.getContent());
-                toolResults.add(toolResult);
-                
-                logger.info("<<< TOOL RESULT [{}]: success={}, contentLength={}", 
-                    toolName, result.isSuccess(), result.getContent() != null ? result.getContent().length() : 0);
-                logger.debug("Tool result content: {}", result.getContent());
-                
-            } catch (Exception e) {
-                logger.error("Error executing tool call", e);
-                Map<String, Object> errorResult = new HashMap<>();
-                errorResult.put("role", "tool");
-                errorResult.put("content", "Error: " + e.getMessage());
-                toolResults.add(errorResult);
+        // Execute each tool call in separate thread to avoid blocking reactor-http-epoll
+        return Mono.fromCallable(() -> {
+            for (Map<String, Object> toolCall : toolCalls) {
+                try {
+                    String toolCallId = (String) toolCall.get("id");
+                    Map<String, Object> function = (Map<String, Object>) toolCall.get("function");
+                    String toolName = (String) function.get("name");
+                    String argumentsStr = (String) function.get("arguments");
+                    
+                    logger.info("Executing tool: {} with args: {}", toolName, argumentsStr);
+                    
+                    // Parse arguments
+                    Map<String, Object> arguments = objectMapper.readValue(argumentsStr, Map.class);
+                    
+                    // Execute tool via MCP
+                    McpClientService.ToolCallResult result = mcpClientService.callTool(toolName, arguments);
+                    
+                    // Build tool result message
+                    Map<String, Object> toolResult = new HashMap<>();
+                    toolResult.put("role", "tool");
+                    toolResult.put("tool_call_id", toolCallId);
+                    toolResult.put("name", toolName);
+                    toolResult.put("content", result.getContent());
+                    toolResults.add(toolResult);
+                    
+                    logger.info("<<< TOOL RESULT [{}]: success={}, contentLength={}", 
+                        toolName, result.isSuccess(), result.getContent() != null ? result.getContent().length() : 0);
+                    logger.debug("Tool result content: {}", result.getContent());
+                    
+                } catch (Exception e) {
+                    logger.error("Error executing tool call", e);
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("role", "tool");
+                    errorResult.put("content", "Error: " + e.getMessage());
+                    toolResults.add(errorResult);
+                }
             }
-        }
+            return toolResults;
+        })
+        .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+        .flatMap(results -> {
+            // Build new request with tool results
+            List<Map<String, Object>> messages = (List<Map<String, Object>>) originalRequestBody.get("messages");
+            List<Map<String, Object>> newMessages = new ArrayList<>(messages);
+            
+            // Add tool results to messages
+            newMessages.addAll(results);
+            
+            Map<String, Object> newRequestBody = new HashMap<>(originalRequestBody);
+            newRequestBody.put("messages", newMessages);
         
-        // Build new request with tool results
-        List<Map<String, Object>> messages = (List<Map<String, Object>>) originalRequestBody.get("messages");
-        List<Map<String, Object>> newMessages = new ArrayList<>(messages);
-        
-        // Add tool results to messages
-        newMessages.addAll(toolResults);
-        
-        Map<String, Object> newRequestBody = new HashMap<>(originalRequestBody);
-        newRequestBody.put("messages", newMessages);
-        
-        // Add system message to instruct AI to provide final answer after tool results
-        // This prevents infinite tool calling loops
-        List<Map<String, Object>> existingMessages = (List<Map<String, Object>>) originalRequestBody.get("messages");
-        boolean hasSystemMessage = existingMessages.stream()
-                .anyMatch(m -> "system".equals(m.get("role")));
-        
-        if (!hasSystemMessage) {
-            // Add system message at the beginning
-            Map<String, Object> systemMsg = new HashMap<>();
-            systemMsg.put("role", "system");
-            systemMsg.put("content", "You are a helpful assistant with access to tools. CRITICAL RULES: 1) When you receive tool results, you MUST use the actual data from the results to answer the user's question. 2) NEVER just count the results or say 'found N items'. 3) ALWAYS extract and present the actual content from tool results. 4) After receiving tool results, provide a final natural language answer - do NOT call tools again. 5) Tool results contain real data - use it to give a complete answer.");
-            newMessages.add(0, systemMsg);
-        }
-        
-        logger.info("Sending {} tool results back to AI (recursionDepth={})", toolResults.size(), recursionDepth);
-        logger.info("Tool results payload: {}", toolResults);
-        
-        // Log the request with tool results
-        logAiRequest(newRequestBody, recursionDepth + 1);
-        
-        // Send back to AI for final response
-        logger.info(">>> Sending request to AI API with tool results (depth={})", recursionDepth + 1);
-        return webClient.post()
-                .uri("/chat/completions")
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                .bodyValue(newRequestBody)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .doOnSuccess(response -> logger.info("<<< Received response from AI API (depth={})", recursionDepth + 1))
-                .doOnError(e -> logger.error(">>> AI API request failed: {}", e.getMessage()))
-                .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1, null, request));
+            // Add system message to instruct AI to provide final answer after tool results
+            // This prevents infinite tool calling loops
+            List<Map<String, Object>> existingMessages = (List<Map<String, Object>>) originalRequestBody.get("messages");
+            boolean hasSystemMessage = existingMessages.stream()
+                    .anyMatch(m -> "system".equals(m.get("role")));
+            
+            if (!hasSystemMessage) {
+                // Add system message at the beginning
+                Map<String, Object> systemMsg = new HashMap<>();
+                systemMsg.put("role", "system");
+                systemMsg.put("content", "You are a helpful assistant with access to tools. CRITICAL RULES: 1) When you receive tool results, you MUST use the actual data from the results to answer the user's question. 2) NEVER just count the results or say 'found N items'. 3) ALWAYS extract and present the actual content from tool results. 4) After receiving tool results, provide a final natural language answer - do NOT call tools again. 5) Tool results contain real data - use it to give a complete answer.");
+                newMessages.add(0, systemMsg);
+            }
+            
+            logger.info("Sending {} tool results back to AI (recursionDepth={})", results.size(), recursionDepth);
+            logger.info("Tool results payload: {}", results);
+            
+            // Log the request with tool results
+            logAiRequest(newRequestBody, recursionDepth + 1);
+            
+            // Send back to AI for final response
+            logger.info(">>> Sending request to AI API with tool results (depth={})", recursionDepth + 1);
+            return webClient.post()
+                    .uri("/chat/completions")
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .bodyValue(newRequestBody)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .doOnSuccess(response -> logger.info("<<< Received response from AI API (depth={})", recursionDepth + 1))
+                    .doOnError(e -> logger.error(">>> AI API request failed: {}", e.getMessage()))
+                    .flatMap(newResponse -> handleAiResponse(newResponse, newRequestBody, webClient, apiKey, baseUrl, recursionDepth + 1, null, request));
+        });
     }
 
     public Map<String, Object> buildDebugRequest(ChatRequest request) {
@@ -631,7 +636,8 @@ public class AiChatService {
         List<Map<String, Object>> mcpTools = mcpClientService.getToolDefinitionsForAI();
         if (!mcpTools.isEmpty()) {
             requestBody.put("tools", mcpTools);
-            requestBody.put("tool_choice", "auto");
+            // tool_choice: "auto" may not be supported by all providers
+            // requestBody.put("tool_choice", "auto");
             logger.debug("Added {} MCP tool definitions to request", mcpTools.size());
         }
         
@@ -759,7 +765,8 @@ public class AiChatService {
         List<Map<String, Object>> mcpTools = mcpClientService.getToolDefinitionsForAI();
         if (!mcpTools.isEmpty()) {
             requestBody.put("tools", mcpTools);
-            requestBody.put("tool_choice", "auto");
+            // tool_choice: "auto" may not be supported by all providers
+            // requestBody.put("tool_choice", "auto");
             logger.debug("Added {} MCP tool definitions to request", mcpTools.size());
         }
         

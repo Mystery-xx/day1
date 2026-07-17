@@ -91,6 +91,29 @@ services:
               count: all
               capabilities: [gpu]
 
+  mcp-assistant:
+    build:
+      context: ./mcp-assistant
+      dockerfile: Dockerfile
+    container_name: mcp-assistant
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - INDEX_ROOT=/app/.index
+      - REPO_ROOT=/app/repo
+    networks:
+      - frontend-net
+      - backend-net
+    volumes:
+      - mcp-index:/app/.index
+      - ./mcp-assistant/repo:/app/repo
+      - /mnt/f/git/day1:/app/repo/day1:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
 networks:
   frontend-net:
     driver: bridge
@@ -102,3 +125,4 @@ volumes:
   h2-data:
   rag-index:
   ollama-data:
+  mcp-index:

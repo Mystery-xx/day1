@@ -67,6 +67,29 @@ public class McpSessionClient {
         }
     }
     
+    /**
+     * Store HTTP client in map without calling SDK initialize (used when mcpHttpService already initialized)
+     */
+    public void storeHttpClient(String serverId, String baseUrl) {
+        try {
+            String normalizedUrl = ensureTrailingSlash(baseUrl);
+            
+            HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(normalizedUrl)
+                    .build();
+            
+            McpSyncClient client = McpClient.sync(transport)
+                    .build();
+            
+            clients.put(serverId, client);
+            httpTransports.put(serverId, transport);
+            
+            logger.info("HTTP MCP client stored in clients map for server {} (total clients: {})", serverId, clients.size());
+            
+        } catch (Exception e) {
+            logger.error("Failed to store HTTP client for server {}: {}", serverId, e.getMessage(), e);
+        }
+    }
+    
     public SessionInfo initialize(String serverId, String baseUrl) {
         // Default to HTTP for backward compatibility
         return initializeHttp(serverId, baseUrl);
@@ -122,6 +145,8 @@ public class McpSessionClient {
             
             clients.put(serverId, client);
             httpTransports.put(serverId, transport);
+            
+            logger.info("MCP client stored in clients map for server {} (total clients: {})", serverId, clients.size());
             
             return new SessionInfo(true, serverId, "Connected");
             

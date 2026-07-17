@@ -7,20 +7,38 @@
   "scripts": {
     "build": "tsc",
     "mcp": "node dist/index.js",
+    "mcp:assistant": "node dist/index.js",
+    "start:http": "node dist/bin/http-server.js",
     "dev": "tsc --watch",
-    "lint": "eslint src/**/*.ts"
+    "lint": "eslint src/**/*.ts",
+    "chunk": "node dist/index/chunker.js",
+    "test": "vitest run",
+    "test:assistant": "tsx scripts/test-assistant.ts",
+    "test:search": "vitest run tests/search.test.ts",
+    "test:help": "vitest run tests/help.test.ts",
+    "test:structure": "vitest run src/tools/structure.test.ts",
+    "test:git": "vitest run src/tools/git.test.ts",
+    "test:http-server": "tsx scripts/test-http-server.ts",
+    "register-day1": "tsx scripts/register-day1-project.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/node": "^2.0.0-beta.4",
     "@modelcontextprotocol/server": "latest",
-    "zod": "^4.2.0",
+    "@types/marked": "^6.0.0",
+    "fuse.js": "^7.0.0",
+    "glob": "^11.0.0",
+    "marked": "^18.0.6",
     "simple-git": "^3.27.0",
-    "fuse.js": "^7.0.0"
+    "zod": "^4.2.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "latest",
     "@types/node": "^22.0.0",
-    "typescript": "^5.6.0",
-    "eslint": "^9.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0"
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
   }
 }

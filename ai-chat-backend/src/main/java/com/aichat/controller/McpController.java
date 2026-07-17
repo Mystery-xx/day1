@@ -280,19 +280,32 @@ public class McpController {
             return "Unable to resolve hostname";
         }
 
+        String ip = address.getHostAddress();
+        
         // Block AWS metadata endpoint
-        if ("169.254.169.254".equals(address.getHostAddress())) {
+        if ("169.254.169.254".equals(ip)) {
             return "AWS metadata endpoint is not allowed";
         }
 
-        // Block loopback, link-local, site-local, any-local addresses
+        // Allow Docker host gateway (typically 172.17.0.1, 172.18.0.1, 172.19.0.1, etc.)
+        // This is needed for container-to-host communication
+        boolean isDockerGateway = ip.startsWith("172.17.") || ip.startsWith("172.18.") || 
+                                  ip.startsWith("172.19.") || ip.startsWith("172.20.") ||
+                                  ip.startsWith("172.21.") || ip.startsWith("172.22.") ||
+                                  ip.startsWith("172.23.") || ip.startsWith("172.24.") ||
+                                  ip.startsWith("172.25.") || ip.startsWith("172.26.") ||
+                                  ip.startsWith("172.27.") || ip.startsWith("172.28.") ||
+                                  ip.startsWith("172.29.") || ip.startsWith("172.30.") ||
+                                  ip.startsWith("172.31.");
+        
+        // Block loopback, link-local, site-local, any-local addresses (except Docker gateway)
         if (address.isLoopbackAddress()) {
             return "Loopback addresses are not allowed";
         }
         if (address.isLinkLocalAddress()) {
             return "Link-local addresses are not allowed";
         }
-        if (address.isSiteLocalAddress()) {
+        if (address.isSiteLocalAddress() && !isDockerGateway) {
             return "Site-local (private) addresses are not allowed";
         }
         if (address.isAnyLocalAddress()) {
@@ -377,18 +390,23 @@ public class McpController {
         
         McpServerConfig server = serverRepository.findById(id).orElse(null);
         if (server == null) {
+            logger.warn("Server {} not found", id);
             response.put("success", false);
             response.put("error", "Server not found");
             return ResponseEntity.status(404).body(response);
         }
         
+        logger.info("Server {} found, checking connection status", id);
         if (!mcpClientService.isConnected(id)) {
+            logger.warn("Server {} is not connected", id);
             response.put("success", false);
             response.put("error", "Not connected to server");
             return ResponseEntity.status(400).body(response);
         }
         
+        logger.info("Server {} is connected, calling listTools", id);
         List<McpClientService.ToolInfo> tools = mcpClientService.listTools(id);
+        logger.info("Received {} tools from listTools", tools.size());
         
         response.put("success", true);
         response.put("tools", tools);

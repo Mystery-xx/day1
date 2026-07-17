@@ -1,20 +1,43 @@
 import { McpServer } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
-import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { startHttpServer } from './config/http-server.js';
+import { ProjectRegistry } from './config/project-registry.js';
+import { createSearchToolHandler, searchInputSchema } from './tools/search.js';
+import { createStructureTools } from './tools/structure.js';
+import {
+  createGitTools,
+  gitStatusSchema,
+  gitDiffSchema,
+  gitLogSchema,
+  gitBranchSchema,
+} from './tools/git.js';
+import {
+  getDocsSchema,
+  getDocsTool,
+  getProjectStateSchema,
+  getProjectStateTool,
+} from './tools/help.js';
+import {
+  createIndexToolHandler,
+  indexInputSchema,
+} from './tools/index.js';
+import {
+  createProjectTools,
+  registerProjectSchema,
+  unregisterProjectSchema,
+  getProjectInfoSchema,
+  listProjectsSchema,
+} from './tools/projects.js';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-const REPO_ROOT = '/mnt/f/git/day1';
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per minute per tool
+const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per minute per tool per project
 
 // ============================================================================
-// Rate Limiter
+// Per-Project Rate Limiter
 // ============================================================================
 
 interface RateLimitEntry {
@@ -22,113 +45,50 @@ interface RateLimitEntry {
   windowStart: number;
 }
 
-class RateLimiter {
-  private limits: Map<string, RateLimitEntry> = new Map();
+class PerProjectRateLimiter {
+  private limits: Map<string, Map<string, RateLimitEntry>> = new Map();
 
-  checkLimit(toolName: string): { allowed: boolean; message?: string } {
+  checkLimit(projectId: string, toolName: string): { allowed: boolean; message?: string } {
     const now = Date.now();
-    const entry = this.limits.get(toolName);
+    
+    let projectLimits = this.limits.get(projectId);
+    if (!projectLimits) {
+      projectLimits = new Map();
+      this.limits.set(projectId, projectLimits);
+    }
+
+    const entry = projectLimits.get(toolName);
 
     if (!entry) {
-      this.limits.set(toolName, { count: 1, windowStart: now });
+      projectLimits.set(toolName, { count: 1, windowStart: now });
       return { allowed: true };
     }
 
-    // Reset window if expired
     if (now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
-      this.limits.set(toolName, { count: 1, windowStart: now });
+      projectLimits.set(toolName, { count: 1, windowStart: now });
       return { allowed: true };
     }
 
-    // Check if limit exceeded
     if (entry.count >= RATE_LIMIT_MAX_REQUESTS) {
       return {
         allowed: false,
-        message: `Rate limit exceeded for tool '${toolName}'. Maximum ${RATE_LIMIT_MAX_REQUESTS} requests per ${RATE_LIMIT_WINDOW_MS / 1000} seconds.`,
+        message: `Rate limit exceeded for tool '${toolName}' in project '${projectId}'. Maximum ${RATE_LIMIT_MAX_REQUESTS} requests per ${RATE_LIMIT_WINDOW_MS / 1000} seconds.`,
       };
     }
 
-    // Increment counter
     entry.count++;
     return { allowed: true };
   }
 
-  logViolation(toolName: string): void {
-    console.error(`[RATE_LIMIT] Violation: Tool '${toolName}' exceeded ${RATE_LIMIT_MAX_REQUESTS} req/min`);
+  logViolation(projectId: string, toolName: string): void {
+    console.error(`[RATE_LIMIT] Violation: Tool '${toolName}' in project '${projectId}' exceeded ${RATE_LIMIT_MAX_REQUESTS} req/min`);
   }
 }
 
-const rateLimiter = new RateLimiter();
+const rateLimiter = new PerProjectRateLimiter();
 
-// ============================================================================
-// Path Sandboxing
-// ============================================================================
-
-class PathSandbox {
-  private readonly rootPath: string;
-
-  constructor(rootPath: string) {
-    this.rootPath = path.normalize(path.resolve(rootPath));
-  }
-
-  async validatePath(requestedPath: string): Promise<{ valid: boolean; resolvedPath?: string; error?: string }> {
-    try {
-      // Normalize the requested path first
-      const normalizedRequested = path.normalize(requestedPath);
-
-      // Resolve to absolute path
-      const resolvedPath = path.resolve(this.rootPath, normalizedRequested);
-
-      // Check if path starts with root (basic check before realpath)
-      if (!resolvedPath.startsWith(this.rootPath)) {
-        return {
-          valid: false,
-          error: `Access denied: Path '${requestedPath}' is outside the sandbox directory.`,
-        };
-      }
-
-      // Verify the path exists and get real path (resolves symlinks)
-      try {
-        const realPath = await fs.realpath(resolvedPath);
-
-        // Final check: ensure real path is still within sandbox
-        if (!realPath.startsWith(this.rootPath)) {
-          return {
-            valid: false,
-            error: `Access denied: Path '${requestedPath}' resolves outside the sandbox directory via symlink.`,
-          };
-        }
-
-        return { valid: true, resolvedPath: realPath };
-      } catch (err) {
-        // Path doesn't exist - for file creation operations, check parent directory
-        const parentDir = path.dirname(resolvedPath);
-        try {
-          const realParentPath = await fs.realpath(parentDir);
-          if (!realParentPath.startsWith(this.rootPath)) {
-            return {
-              valid: false,
-              error: `Access denied: Parent directory of '${requestedPath}' is outside the sandbox.`,
-            };
-          }
-          return { valid: true, resolvedPath: resolvedPath };
-        } catch {
-          return {
-            valid: false,
-            error: `Access denied: Path '${requestedPath}' does not exist and parent directory cannot be verified.`,
-          };
-        }
-      }
-    } catch (err) {
-      return {
-        valid: false,
-        error: `Access denied: Invalid path format - ${(err as Error).message}`,
-      };
-    }
-  }
-}
-
-const pathSandbox = new PathSandbox(REPO_ROOT);
+// Initialize project registry
+const projectRegistry = new ProjectRegistry();
 
 // ============================================================================
 // Error Handling Wrapper
@@ -145,7 +105,6 @@ function withErrorHandling<T extends (...args: any[]) => Promise<any>>(
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       console.error(`[TOOL_ERROR] ${toolName}: ${errorMessage}`);
 
-      // Return actionable error message
       return {
         content: [{ type: 'text' as const, text: `Error in ${toolName}: ${errorMessage}` }],
         isError: true,
@@ -155,284 +114,305 @@ function withErrorHandling<T extends (...args: any[]) => Promise<any>>(
 }
 
 // ============================================================================
-// Tool Implementations (Stubs)
-// ============================================================================
-
-// Tool 1: search
-const searchTool = withErrorHandling('search', async (args: { query: string; path?: string }) => {
-  const rateCheck = rateLimiter.checkLimit('search');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('search');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  // Path validation if provided
-  if (args.path) {
-    const pathCheck = await pathSandbox.validatePath(args.path);
-    if (!pathCheck.valid) {
-      return { content: [{ type: 'text' as const, text: pathCheck.error! }], isError: true };
-    }
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: `Search tool called with query: "${args.query}"` }],
-  };
-});
-
-// Tool 2: project_structure
-const projectStructureTool = withErrorHandling('project_structure', async () => {
-  const rateCheck = rateLimiter.checkLimit('project_structure');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('project_structure');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: 'Project structure tool called' }],
-  };
-});
-
-// Tool 3: find_files
-const findFilesTool = withErrorHandling('find_files', async (args: { pattern: string; path?: string }) => {
-  const rateCheck = rateLimiter.checkLimit('find_files');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('find_files');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  if (args.path) {
-    const pathCheck = await pathSandbox.validatePath(args.path);
-    if (!pathCheck.valid) {
-      return { content: [{ type: 'text' as const, text: pathCheck.error! }], isError: true };
-    }
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: `Find files tool called with pattern: "${args.pattern}"` }],
-  };
-});
-
-// Tool 4: get_docs
-const getDocsTool = withErrorHandling('get_docs', async (args: { topic: string }) => {
-  const rateCheck = rateLimiter.checkLimit('get_docs');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('get_docs');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: `Get docs tool called for topic: "${args.topic}"` }],
-  };
-});
-
-// Tool 5: get_project_state
-const getProjectStateTool = withErrorHandling('get_project_state', async () => {
-  const rateCheck = rateLimiter.checkLimit('get_project_state');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('get_project_state');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: 'Get project state tool called' }],
-  };
-});
-
-// Tool 6: git_status
-const gitStatusTool = withErrorHandling('git_status', async () => {
-  const rateCheck = rateLimiter.checkLimit('git_status');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('git_status');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: 'Git status tool called' }],
-  };
-});
-
-// Tool 7: git_diff
-const gitDiffTool = withErrorHandling('git_diff', async (args: { file?: string; ref?: string }) => {
-  const rateCheck = rateLimiter.checkLimit('git_diff');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('git_diff');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  if (args.file) {
-    const pathCheck = await pathSandbox.validatePath(args.file);
-    if (!pathCheck.valid) {
-      return { content: [{ type: 'text' as const, text: pathCheck.error! }], isError: true };
-    }
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: `Git diff tool called${args.file ? ` for file: "${args.file}"` : ''}${args.ref ? ` at ref: "${args.ref}"` : ''}` }],
-  };
-});
-
-// Tool 8: git_log
-const gitLogTool = withErrorHandling('git_log', async (args: { file?: string; maxCount?: number }) => {
-  const rateCheck = rateLimiter.checkLimit('git_log');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('git_log');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  if (args.file) {
-    const pathCheck = await pathSandbox.validatePath(args.file);
-    if (!pathCheck.valid) {
-      return { content: [{ type: 'text' as const, text: pathCheck.error! }], isError: true };
-    }
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: `Git log tool called${args.file ? ` for file: "${args.file}"` : ''}${args.maxCount ? ` (max ${args.maxCount} entries)` : ''}` }],
-  };
-});
-
-// Tool 9: git_branch
-const gitBranchTool = withErrorHandling('git_branch', async () => {
-  const rateCheck = rateLimiter.checkLimit('git_branch');
-  if (!rateCheck.allowed) {
-    rateLimiter.logViolation('git_branch');
-    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
-  }
-
-  return {
-    content: [{ type: 'text' as const, text: 'Git branch tool called' }],
-  };
-});
-
-// ============================================================================
 // Server Setup
 // ============================================================================
 
-const server = new McpServer({
-  name: 'day1-assistant',
-  version: '1.0.0',
+export const server = new McpServer({
+  name: 'multi-project-assistant',
+  version: '2.0.0',
 });
 
-// Register all tools with Zod validation schemas
+// Project management tools
+const projectTools = createProjectTools();
+
 server.registerTool(
-  'search',
+  'list_projects',
   {
-    title: 'Search',
-    description: 'Search for content within the project',
-    inputSchema: z.object({
-      query: z.string().describe('Search query string'),
-      path: z.string().optional().describe('Optional path to limit search scope'),
-    }),
+    title: 'List Projects',
+    description: 'Returns all registered projects with id, name, rootPath, and lastIndexed timestamp',
+    inputSchema: listProjectsSchema,
   },
-  searchTool as any
+  projectTools.listProjects
 );
 
 server.registerTool(
-  'project_structure',
+  'register_project',
   {
-    title: 'Project Structure',
-    description: 'Get the project directory structure',
-    inputSchema: z.object({}),
+    title: 'Register Project',
+    description: 'Register a new project for indexing. Validates that rootPath exists and is a directory',
+    inputSchema: registerProjectSchema,
   },
-  projectStructureTool as any
+  projectTools.registerProject
 );
 
 server.registerTool(
-  'find_files',
+  'unregister_project',
   {
-    title: 'Find Files',
-    description: 'Find files matching a pattern',
-    inputSchema: z.object({
-      pattern: z.string().describe('File pattern to match (glob-style)'),
-      path: z.string().optional().describe('Optional base path for search'),
-    }),
+    title: 'Unregister Project',
+    description: 'Remove a project from the registry by ID. Fails if project does not exist',
+    inputSchema: unregisterProjectSchema,
   },
-  findFilesTool as any
+  projectTools.unregisterProject
 );
 
+server.registerTool(
+  'get_project_info',
+  {
+    title: 'Get Project Info',
+    description: 'Get full project configuration by ID. Fails if project does not exist',
+    inputSchema: getProjectInfoSchema,
+  },
+  projectTools.getProjectInfo
+);
+
+// Index tool
+let indexToolHandler: Awaited<ReturnType<typeof createIndexToolHandler>> | null = null;
+
+const getIndexTool = async () => {
+  if (!indexToolHandler) {
+    indexToolHandler = await createIndexToolHandler();
+  }
+  return indexToolHandler;
+};
+
+const indexTool = withErrorHandling('index', async (args: any) => {
+  const handler = await getIndexTool();
+  return handler(args);
+});
+
+server.registerTool(
+  'index',
+  {
+    title: 'Index',
+    description: 'Index markdown files for a project. Validates projectId, scans folder for .md files, chunks content, and builds Fuse.js index.',
+    inputSchema: indexInputSchema,
+  },
+  indexTool
+);
+
+// Get docs tool (no projectId needed - uses index)
 server.registerTool(
   'get_docs',
   {
     title: 'Get Documentation',
-    description: 'Retrieve documentation for a topic',
-    inputSchema: z.object({
-      topic: z.string().describe('Documentation topic to retrieve'),
-    }),
+    description: 'Retrieve documentation for a topic via RAG lookup. Without topic, returns project overview.',
+    inputSchema: getDocsSchema,
   },
-  getDocsTool as any
+  withErrorHandling('get_docs', getDocsTool)
 );
 
+// Get project state tool (no args needed - uses current git context)
 server.registerTool(
   'get_project_state',
   {
     title: 'Get Project State',
-    description: 'Get current project state and context',
-    inputSchema: z.object({}),
+    description: 'Get current project state: branch, last commit, commit count, indexed docs',
+    inputSchema: getProjectStateSchema,
   },
-  getProjectStateTool as any
+  withErrorHandling('get_project_state', getProjectStateTool)
 );
+
+// Git tools
+const gitTools = createGitTools();
+
+const gitStatusTool = withErrorHandling('git_status', async (args: { projectId: string }) => {
+  const rateCheck = rateLimiter.checkLimit(args.projectId, 'git_status');
+  if (!rateCheck.allowed) {
+    rateLimiter.logViolation(args.projectId, 'git_status');
+    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
+  }
+
+  const result = await gitTools.gitStatus({ projectId: args.projectId });
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+  };
+});
 
 server.registerTool(
   'git_status',
   {
     title: 'Git Status',
-    description: 'Get git repository status',
-    inputSchema: z.object({}),
+    description: 'Get git repository status for a project',
+    inputSchema: gitStatusSchema,
   },
-  gitStatusTool as any
+  gitStatusTool
 );
+
+const gitDiffTool = withErrorHandling('git_diff', async (args: { projectId: string; staged?: boolean; file?: string }) => {
+  const rateCheck = rateLimiter.checkLimit(args.projectId, 'git_diff');
+  if (!rateCheck.allowed) {
+    rateLimiter.logViolation(args.projectId, 'git_diff');
+    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
+  }
+
+  const result = await gitTools.gitDiff({
+    projectId: args.projectId,
+    staged: args.staged,
+    file: args.file,
+  });
+
+  return {
+    content: [{ type: 'text' as const, text: result }],
+  };
+});
 
 server.registerTool(
   'git_diff',
   {
     title: 'Git Diff',
     description: 'Get git diff for files or refs',
-    inputSchema: z.object({
-      file: z.string().optional().describe('Optional file path to diff'),
-      ref: z.string().optional().describe('Optional git ref to compare'),
-    }),
+    inputSchema: gitDiffSchema,
   },
-  gitDiffTool as any
+  gitDiffTool
 );
+
+const gitLogTool = withErrorHandling('git_log', async (args: { projectId: string; limit?: number; file?: string }) => {
+  const rateCheck = rateLimiter.checkLimit(args.projectId, 'git_log');
+  if (!rateCheck.allowed) {
+    rateLimiter.logViolation(args.projectId, 'git_log');
+    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
+  }
+
+  const result = await gitTools.gitLog({
+    projectId: args.projectId,
+    limit: args.limit,
+    file: args.file,
+  });
+
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+  };
+});
 
 server.registerTool(
   'git_log',
   {
     title: 'Git Log',
     description: 'Get git commit history',
-    inputSchema: z.object({
-      file: z.string().optional().describe('Optional file path to get log for'),
-      maxCount: z.number().optional().describe('Maximum number of commits to return'),
-    }),
+    inputSchema: gitLogSchema,
   },
-  gitLogTool as any
+  gitLogTool
 );
+
+const gitBranchTool = withErrorHandling('git_branch', async (args: { projectId: string }) => {
+  const rateCheck = rateLimiter.checkLimit(args.projectId, 'git_branch');
+  if (!rateCheck.allowed) {
+    rateLimiter.logViolation(args.projectId, 'git_branch');
+    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
+  }
+
+  const result = await gitTools.gitBranch({ projectId: args.projectId });
+
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+  };
+});
 
 server.registerTool(
   'git_branch',
   {
     title: 'Git Branch',
     description: 'Get git branch information',
-    inputSchema: z.object({}),
+    inputSchema: gitBranchSchema,
   },
-  gitBranchTool as any
+  gitBranchTool
 );
 
-// ============================================================================
-// Main Entry Point
-// ============================================================================
+// Structure tools
+const structureTools = createStructureTools();
 
-async function main() {
-  console.error('[day1-assistant] Starting MCP server...');
-
-  try {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error('[day1-assistant] Server connected and listening on stdio');
-  } catch (error) {
-    console.error(`[day1-assistant] Failed to start server: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    process.exit(1);
+const projectStructureTool = withErrorHandling('project_structure', async (args: { projectId: string; depth?: number; exclude?: string[] }) => {
+  const rateCheck = rateLimiter.checkLimit(args.projectId, 'project_structure');
+  if (!rateCheck.allowed) {
+    rateLimiter.logViolation(args.projectId, 'project_structure');
+    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
   }
-}
 
-main();
+  const result = await structureTools.projectStructure({
+    projectId: args.projectId,
+    depth: args.depth,
+    exclude: args.exclude,
+  });
+
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+  };
+});
+
+server.registerTool(
+  'project_structure',
+  {
+    title: 'Project Structure',
+    description: 'Get the project directory structure as a tree',
+    inputSchema: z.object({
+      projectId: z.string().min(1).describe('Project ID from registry'),
+      depth: z.number().min(1).max(5).default(2).describe('Directory depth (1-5, default: 2)'),
+      exclude: z.array(z.string()).optional().describe('Additional patterns to exclude'),
+    }),
+  },
+  projectStructureTool
+);
+
+const findFilesTool = withErrorHandling('find_files', async (args: { projectId: string; pattern: string; maxResults?: number; path?: string }) => {
+  const rateCheck = rateLimiter.checkLimit(args.projectId, 'find_files');
+  if (!rateCheck.allowed) {
+    rateLimiter.logViolation(args.projectId, 'find_files');
+    return { content: [{ type: 'text' as const, text: rateCheck.message! }], isError: true };
+  }
+
+  const result = await structureTools.findFiles({
+    projectId: args.projectId,
+    pattern: args.pattern,
+    maxResults: args.maxResults,
+    path: args.path,
+  });
+
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+  };
+});
+
+server.registerTool(
+  'find_files',
+  {
+    title: 'Find Files',
+    description: 'Find files matching a glob pattern',
+    inputSchema: z.object({
+      projectId: z.string().min(1).describe('Project ID from registry'),
+      pattern: z.string().min(1).describe('Glob pattern to match (e.g., "**/*.ts")'),
+      maxResults: z.number().default(50).describe('Maximum results to return (default: 50)'),
+      path: z.string().optional().describe('Optional base path for search'),
+    }),
+  },
+  findFilesTool
+);
+
+// Search tool (global, not project-specific)
+let searchToolHandler: Awaited<ReturnType<typeof createSearchToolHandler>> | null = null;
+
+const getSearchTool = async () => {
+  if (!searchToolHandler) {
+    searchToolHandler = await createSearchToolHandler({
+      checkLimit: (toolName: string) => rateLimiter.checkLimit('default', toolName),
+      logViolation: (toolName: string) => rateLimiter.logViolation('default', toolName),
+    });
+  }
+  return searchToolHandler;
+};
+
+const searchTool = withErrorHandling('search', async (args: any) => {
+  const handler = await getSearchTool();
+  return handler(args);
+});
+
+server.registerTool(
+  'search',
+  {
+    title: 'Search',
+    description: 'Search for content within the project using fuzzy matching',
+    inputSchema: searchInputSchema,
+  },
+  searchTool
+);
+
+

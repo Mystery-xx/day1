@@ -1,0 +1,32 @@
+# Docker Compose configuration for mcp-assistant HTTP server
+# Usage: docker-compose -f docker-compose.mcp-assistant.yml up --build
+
+services:
+  mcp-assistant:
+    build:
+      context: ./mcp-assistant
+      dockerfile: Dockerfile
+    container_name: mcp-assistant
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - INDEX_ROOT=/app/.index
+      - REPO_ROOT=/app/repo
+    volumes:
+      # Persist .index directory across container restarts
+      - mcp-index:/app/.index
+      # Mount repository root for indexing (read-only)
+      - ./:/app/repo:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mcp-index:
+    driver: local

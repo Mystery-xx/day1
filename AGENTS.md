@@ -139,6 +139,18 @@ MCP operations are logged with detailed request/response information:
 - Frontend: Multi-stage Docker (Node build → Nginx serving static files)
 - Model: Configured via `AI_MODEL` environment variable
 
+**IMPORTANT: Always rebuild backend with `--no-cache` to ensure code changes are picked up:**
+
+```bash
+# ALWAYS use --no-cache for backend rebuilds
+docker-compose build --no-cache backend && docker-compose restart backend
+
+# Or full rebuild
+docker-compose up --build
+```
+
+Maven dependencies may be cached in the Docker layer, causing old code to run even after file changes.
+
 ## Docker Compose Files
 
 ### docker-compose.yml (Default - Port 8082)

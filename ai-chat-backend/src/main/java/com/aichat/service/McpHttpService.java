@@ -58,7 +58,7 @@ public class McpHttpService {
             WebClient webClient = WebClient.builder()
                     .baseUrl(baseUrl)
                     .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                    .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE, "application/event-stream")
+                    .defaultHeader(HttpHeaders.ACCEPT, "application/json, text/event-stream")
                     .build();
 
             Map<String, Object> request = buildJsonRpcRequest("initialize", Map.of(
@@ -70,11 +70,16 @@ public class McpHttpService {
                 )
             ));
 
-            JsonNode response = webClient.post()
+            // Get raw response as string to handle SSE format
+            String rawResponse = webClient.post()
                     .bodyValue(request)
                     .retrieve()
-                    .bodyToMono(JsonNode.class)
+                    .bodyToMono(String.class)
                     .block();
+
+            // Parse SSE format: extract JSON from "data: {...}" line
+            String jsonContent = extractJsonFromSse(rawResponse);
+            JsonNode response = objectMapper.readTree(jsonContent);
 
             if (response.has("error")) {
                 String errorMsg = response.get("error").toString();
@@ -114,16 +119,21 @@ public class McpHttpService {
             WebClient webClient = WebClient.builder()
                     .baseUrl(baseUrl)
                     .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                    .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                    .defaultHeader(HttpHeaders.ACCEPT, "application/json, text/event-stream")
                     .build();
 
             Map<String, Object> request = buildJsonRpcRequest("tools/list", Map.of());
 
-            JsonNode response = webClient.post()
+            // Get raw response as string to handle SSE format
+            String rawResponse = webClient.post()
                     .bodyValue(request)
                     .retrieve()
-                    .bodyToMono(JsonNode.class)
+                    .bodyToMono(String.class)
                     .block();
+
+            // Parse SSE format: extract JSON from "data: {...}" line
+            String jsonContent = extractJsonFromSse(rawResponse);
+            JsonNode response = objectMapper.readTree(jsonContent);
 
             if (response.has("error")) {
                 String errorMsg = response.get("error").toString();
@@ -170,7 +180,7 @@ public class McpHttpService {
             WebClient webClient = WebClient.builder()
                     .baseUrl(baseUrl)
                     .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                    .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                    .defaultHeader(HttpHeaders.ACCEPT, "application/json, text/event-stream")
                     .build();
 
             Map<String, Object> params = new HashMap<>();
@@ -179,11 +189,35 @@ public class McpHttpService {
 
             Map<String, Object> request = buildJsonRpcRequest("tools/call", params);
 
-            JsonNode response = webClient.post()
+            // Execute HTTP call - MCP returns SSE stream (data: {...})
+            // Use exchangeToMono to handle non-JSON response without throwing exception
+            String responseBody = webClient.post()
                     .bodyValue(request)
-                    .retrieve()
-                    .bodyToMono(JsonNode.class)
-                    .block();
+                    .exchangeToMono(response -> {
+                        if (response.statusCode().is2xxSuccessful()) {
+                            return response.bodyToMono(String.class);
+                        } else {
+                            return Mono.error(new RuntimeException("HTTP error: " + response.statusCode()));
+                        }
+                    })
+                    .toFuture()
+                    .get(30, java.util.concurrent.TimeUnit.SECONDS);
+            
+            // Parse SSE response - extract JSON from "data: {...}" format
+            JsonNode response = null;
+            String[] lines = responseBody.split("\n");
+            for (String line : lines) {
+                if (line.startsWith("data: ")) {
+                    String json = line.substring(6).trim();
+                    response = objectMapper.readTree(json);
+                    break;
+                }
+            }
+            
+            if (response == null) {
+                logger.error("No valid JSON in SSE response: {}", responseBody);
+                return new ToolCallResult(false, "Invalid SSE response format", null, null);
+            }
 
             if (response.has("error")) {
                 JsonNode error = response.get("error");
@@ -288,6 +322,33 @@ public class McpHttpService {
         
         // Fallback: convert entire result to string
         return result.toString();
+    }
+
+    /**
+     * Extract JSON from SSE response format.
+     * SSE format: "event: message\ndata: {json}\n\n"
+     */
+    private String extractJsonFromSse(String sseResponse) {
+        if (sseResponse == null || sseResponse.isEmpty()) {
+            throw new IllegalArgumentException("Empty SSE response");
+        }
+        
+        // Find "data: " prefix and extract JSON
+        int dataPrefixIndex = sseResponse.indexOf("data: ");
+        if (dataPrefixIndex == -1) {
+            // If no SSE prefix, treat as plain JSON
+            return sseResponse.trim();
+        }
+        
+        String jsonData = sseResponse.substring(dataPrefixIndex + 6).trim();
+        
+        // Remove trailing newlines or event markers
+        int endIndex = jsonData.indexOf("\n");
+        if (endIndex != -1) {
+            jsonData = jsonData.substring(0, endIndex).trim();
+        }
+        
+        return jsonData;
     }
 
     // === Result Classes ===
