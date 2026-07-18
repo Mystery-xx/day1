@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 
 public class TicketDTO {
     private String ticketId;
+    private String userId;
     private String subject;
     private String status;
     private String priority;
@@ -16,6 +17,9 @@ public class TicketDTO {
     
     public String getTicketId() { return ticketId; }
     public void setTicketId(String ticketId) { this.ticketId = ticketId; }
+    
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
     
     public String getSubject() { return subject; }
     public void setSubject(String subject) { this.subject = subject; }
