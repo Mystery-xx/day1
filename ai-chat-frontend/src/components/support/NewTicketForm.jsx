@@ -104,7 +104,14 @@ export default function NewTicketForm({ onSubmit, onCancel }) {
             className="new-ticket-form-submit"
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Создание...' : 'Создать'}
+            {isSubmitting ? (
+              <>
+                <span className="loading" />
+                Создание...
+              </>
+            ) : (
+              'Создать'
+            )}
           </button>
         </div>
       </form>

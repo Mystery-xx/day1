@@ -3,6 +3,8 @@ import TicketSelector from '../components/support/TicketSelector'
 import TicketInfo from '../components/support/TicketInfo'
 import SupportChat from '../components/support/SupportChat'
 import NewTicketForm from '../components/support/NewTicketForm'
+import '../components/support/Support.css'
+import './SupportSkeleton.css'
 
 /**
  * SupportPage — page for managing support tickets and chat conversations.
@@ -152,58 +154,23 @@ function SupportPage() {
 
   return (
     <div className="support-page">
-      <div className="page-header" style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '16px 24px',
-        background: '#fff',
-        borderBottom: '1px solid #e0e0e0',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-      }}>
-        <h1 style={{ margin: 0, fontSize: '24px', color: '#333' }}>
-          Поддержка
-        </h1>
-        <a
-          href="/"
-          style={{
-            padding: '10px 20px',
-            fontSize: '14px',
-            fontWeight: '600',
-            textDecoration: 'none',
-            color: '#2196F3',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            background: 'transparent',
-            transition: 'all 0.2s',
-          }}
-        >
+      <header className="page-header">
+        <h1>Поддержка</h1>
+        <a href="/" className="back-link">
           ← Назад к чату
         </a>
-      </div>
+      </header>
 
-      <div className="support-content" style={{
-        padding: '24px',
-        maxWidth: '1400px',
-        margin: '0 auto',
-      }}>
+      <div className="support-content">
         {/* Error banner */}
         {error && (
-          <div className="support-error" style={{
-            padding: '12px 16px',
-            marginBottom: '16px',
-            background: '#ffebee',
-            color: '#c62828',
-            border: '1px solid #f44336',
-            borderRadius: '6px',
-            fontSize: '14px',
-          }}>
+          <div className="support-error">
             {error}
           </div>
         )}
 
         {/* Ticket selector row */}
-        <div className="support-ticket-selector" style={{ marginBottom: '24px' }}>
+        <div className="support-ticket-selector">
           <TicketSelector
             selectedTicketId={selectedTicketId}
             onSelectTicket={handleSelectTicket}
@@ -213,24 +180,14 @@ function SupportPage() {
 
         {/* Loading state */}
         {isLoading && (
-          <div className="support-loading" style={{
-            textAlign: 'center',
-            padding: '48px',
-            color: '#666',
-          }}>
-            <span className="loading"></span>
-            <span style={{ marginLeft: '8px' }}>Загрузка тикета...</span>
+          <div className="support-loading">
+            <div className="skeleton skeleton-card" />
           </div>
         )}
 
         {/* New ticket form */}
         {!isLoading && selectedTicketId === '__new__' && (
-          <div className="support-layout" style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 2fr',
-            gap: '24px',
-            alignItems: 'start',
-          }}>
+          <div className="support-layout">
             <div className="support-layout-info">
               <NewTicketForm
                 onSubmit={handleCreateTicket}
@@ -249,12 +206,7 @@ function SupportPage() {
 
         {/* Main layout: ticket info + chat */}
         {!isLoading && selectedTicketId && selectedTicketId !== '__new__' && (
-          <div className="support-layout" style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 2fr',
-            gap: '24px',
-            alignItems: 'start',
-          }}>
+          <div className="support-layout">
             <div className="support-layout-info">
               <TicketInfo ticket={ticket} />
             </div>
@@ -270,19 +222,12 @@ function SupportPage() {
 
         {/* Empty state */}
         {!isLoading && !selectedTicketId && (
-          <div className="support-empty" style={{
-            textAlign: 'center',
-            padding: '48px',
-            color: '#999',
-            background: '#f9f9f9',
-            borderRadius: '6px',
-            border: '1px dashed #e0e0e0',
-          }}>
-            <div style={{ fontSize: '48px', marginBottom: '12px' }}>🎫</div>
-            <div style={{ fontWeight: '600', fontSize: '16px', marginBottom: '8px' }}>
+          <div className="support-empty">
+            <span className="support-empty-icon">🎫</span>
+            <div className="support-empty-title">
               Выберите тикет
             </div>
-            <div style={{ fontSize: '13px' }}>
+            <div className="support-empty-desc">
               Выберите существующий тикет из списка или создайте новый
             </div>
           </div>
