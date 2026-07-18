@@ -25,6 +25,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          chmod +x scripts/extract-pr-diff.sh
           mkdir -p /tmp/ai-review
           ./scripts/extract-pr-diff.sh ${{ github.event.pull_request.number }} /tmp/ai-review
           echo "diff_size=$(wc -c < /tmp/ai-review/diff.patch)" >> $GITHUB_OUTPUT
