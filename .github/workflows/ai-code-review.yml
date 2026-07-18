@@ -92,7 +92,11 @@ jobs:
           # Build backend
           cd ai-chat-backend
           echo "=== Building backend ==="
-          mvn -B package -DskipTests
+          if ! mvn -B package -DskipTests; then
+            echo "ERROR: Maven build failed"
+            exit 1
+          fi
+          echo "=== Maven build completed ==="
           
           # Start backend in background
           echo "=== Starting backend ==="
@@ -126,7 +130,12 @@ jobs:
           cd /home/runner/work/day1/day1
           echo "=== Calling code review API ==="
           chmod +x scripts/call-review-api.py
-          python3 scripts/call-review-api.py || exit 1
+          if ! python3 scripts/call-review-api.py; then
+            echo "ERROR: Code review API call failed"
+            echo "=== Backend log ==="
+            tail -50 /tmp/backend.log
+            exit 1
+          fi
           
           # Stop backend
           echo "=== Stopping backend ==="
