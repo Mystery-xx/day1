@@ -100,29 +100,50 @@ jobs:
             sleep 2
           done
           
-          # Read diff content
-          DIFF_CONTENT=$(cat /tmp/ai-review/diff.patch | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
-          CHANGED_FILES=$(cat /tmp/ai-review/changed-files.json)
+          # Call code review API using file to avoid "argument list too long"
+          cd /home/runner/work/day1/day1
+          python3 << 'PYTHON_SCRIPT'
+          import json
+          import urllib.request
           
-          # Call code review API
-          REVIEW_RESULT=$(curl -s -X POST http://localhost:8082/api/code-review/analyze \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"unifiedDiff\": $DIFF_CONTENT,
-              \"changedFiles\": $CHANGED_FILES,
-              \"prNumber\": ${{ github.event.pull_request.number }},
-              \"repo\": \"${{ github.repository }}\",
-              \"commitSha\": \"${{ github.event.pull_request.head.sha }}\"
-            }")
+          # Read diff from file
+          with open('/tmp/ai-review/diff.patch', 'r') as f:
+              diff = f.read()
           
-          # Save review result
-          echo "$REVIEW_RESULT" > /tmp/ai-review/review-result.json
+          # Read changed files
+          with open('/tmp/ai-review/changed-files.json', 'r') as f:
+              changed_files = json.load(f)
+          
+          # Build request
+          request = {
+              "unifiedDiff": diff,
+              "changedFiles": changed_files,
+              "prNumber": 2,
+              "repo": "Mystery-xx/day1",
+              "commitSha": ""
+          }
+          
+          # Send request
+          req = urllib.request.Request(
+              'http://localhost:8082/api/code-review/analyze',
+              data=json.dumps(request).encode('utf-8'),
+              headers={'Content-Type': 'application/json'}
+          )
+          
+          with urllib.request.urlopen(req, timeout=300) as response:
+              result = response.read().decode('utf-8')
+          
+          # Save result
+          with open('/tmp/ai-review/review-result.json', 'w') as f:
+              f.write(result)
+          
+          print("Review complete")
+          PYTHON_SCRIPT
           
           # Stop backend
           kill $BACKEND_PID 2>/dev/null || true
           
-          echo "Review complete"
-          cd ..
+          cd ai-chat-backend
 
       - name: Format and post review comment
         env:
