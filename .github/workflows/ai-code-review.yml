@@ -28,6 +28,25 @@ jobs:
         run: |
           chmod +x scripts/extract-pr-diff.sh
           mkdir -p /tmp/ai-review
+          
+          # Debug: show PR info
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "GH Token available: $([ -n "${{ secrets.GITHUB_TOKEN }}" ] && echo 'yes' || echo 'no')"
+          
+          # Test gh CLI
+          echo "Testing gh CLI..."
+          gh --version || { echo "gh CLI not installed"; exit 1; }
+          
+          # Try to get PR info
+          echo "Getting PR info..."
+          gh pr view ${{ github.event.pull_request.number }} --json number,title,state || {
+            echo "ERROR: Cannot access PR #${{ github.event.pull_request.number }}"
+            echo "Available PRs:"
+            gh pr list --limit 10
+            exit 1
+          }
+          
           ./scripts/extract-pr-diff.sh ${{ github.event.pull_request.number }} /tmp/ai-review
           echo "diff_size=$(wc -c < /tmp/ai-review/diff.patch)" >> $GITHUB_OUTPUT
 
