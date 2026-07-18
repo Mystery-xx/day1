@@ -112,9 +112,11 @@ jobs:
           # Decode with replacement for invalid UTF-8 sequences
           diff = diff_bytes.decode('utf-8', errors='replace')
           
-          # Read changed files
+          # Read changed files and convert to FileChange objects
           with open('/tmp/ai-review/changed-files.json', 'r') as f:
-              changed_files = json.load(f)
+              changed_files_list = json.load(f)
+          # Convert to FileChange format: [{filename, additions, deletions, isBinary}]
+          changed_files = [{"filename": name, "additions": 0, "deletions": 0, "isBinary": False} for name in changed_files_list]
           
           # Build request
           request = {
