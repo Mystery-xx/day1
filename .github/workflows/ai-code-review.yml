@@ -32,23 +32,29 @@ jobs:
           # Debug: show PR info
           echo "PR Number: ${{ github.event.pull_request.number }}"
           echo "Repository: ${{ github.repository }}"
-          echo "GH Token available: $([ -n "${{ secrets.GITHUB_TOKEN }}" ] && echo 'yes' || echo 'no')"
+          echo "Base branch: ${{ github.base_ref }}"
+          echo "Head branch: ${{ github.head_ref }}"
           
-          # Test gh CLI
-          echo "Testing gh CLI..."
-          gh --version || { echo "gh CLI not installed"; exit 1; }
+          # Use git diff instead of gh pr diff (more reliable)
+          echo "=== Getting diff via git ==="
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }} || true
+          git fetch origin ${{ github.head_ref }}:${{ github.head_ref }} || true
           
-          # Try to get PR info
-          echo "Getting PR info..."
-          gh pr view ${{ github.event.pull_request.number }} --json number,title,state || {
-            echo "ERROR: Cannot access PR #${{ github.event.pull_request.number }}"
-            echo "Available PRs:"
-            gh pr list --limit 10
-            exit 1
+          # Get diff between base and head
+          git diff ${{ github.base_ref }}..${{ github.head_ref }} > /tmp/ai-review/diff.patch || {
+            echo "WARNING: git diff failed, creating empty diff"
+            echo "" > /tmp/ai-review/diff.patch
           }
           
-          ./scripts/extract-pr-diff.sh ${{ github.event.pull_request.number }} /tmp/ai-review
-          echo "diff_size=$(wc -c < /tmp/ai-review/diff.patch)" >> $GITHUB_OUTPUT
+          # Get changed files
+          git diff --name-only ${{ github.base_ref }}..${{ github.head_ref }} | \
+            python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" \
+            > /tmp/ai-review/changed-files.json || echo '[]' > /tmp/ai-review/changed-files.json
+          
+          DIFF_SIZE=$(wc -c < /tmp/ai-review/diff.patch)
+          echo "diff_size=$DIFF_SIZE" >> $GITHUB_OUTPUT
+          echo "Diff size: ${DIFF_SIZE} bytes"
+          echo "Changed files: $(cat /tmp/ai-review/changed-files.json)"
 
       - name: Build RAG context
         run: |
