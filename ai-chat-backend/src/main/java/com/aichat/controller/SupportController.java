@@ -52,11 +52,6 @@ public class SupportController {
             return ResponseEntity.badRequest().build();
         }
         
-        if (request.getUserId() == null || request.getUserId().isBlank()) {
-            logger.warn("Support chat request with empty userId");
-            return ResponseEntity.badRequest().build();
-        }
-        
         try {
             SupportChatResponse response = supportService.chat(request);
             logger.info("Support chat response generated successfully");

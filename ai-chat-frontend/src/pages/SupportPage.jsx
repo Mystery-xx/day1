@@ -114,7 +114,7 @@ function SupportPage() {
     setMessages((prev) => [
       ...prev,
       { role: 'user', content: text, createdAt: new Date().toISOString() },
-      { role: 'assistant', content: data.response || data.content, createdAt: new Date().toISOString() },
+      { role: 'assistant', content: data.answer || data.response || data.content, createdAt: new Date().toISOString() },
     ])
 
     // Refresh ticket details to get latest state
