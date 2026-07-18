@@ -36,8 +36,8 @@ public class SupportService {
     private final RagSearchService ragSearchService;
     private final OllamaClient ollamaClient;
 
-    @Value("${OLLAMA_MODEL:llama3.2}")
-    private String ollamaModel;
+    @Value("${AI_MODEL:qwen3.6-27b}")
+    private String aiModel;
 
     public SupportService(TicketService ticketService, RagSearchService ragSearchService, OllamaClient ollamaClient) {
         this.ticketService = ticketService;
@@ -85,7 +85,7 @@ public class SupportService {
         // 5. Call LLM via OllamaClient
         OllamaChatResponse ollamaResponse;
         try {
-            ollamaResponse = ollamaClient.chat(messages, ollamaModel);
+            ollamaResponse = ollamaClient.chat(messages, aiModel);
             logger.info("LLM response received: {} chars", 
                 ollamaResponse.getMessage().getContent().length());
         } catch (Exception e) {
