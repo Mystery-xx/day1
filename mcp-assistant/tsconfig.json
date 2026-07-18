@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "src/index.ts",
+    "src/index/fuse-index.ts",
+    "src/index/chunker.ts",
+    "src/index/chunker.test.ts",
+    "src/tools/**/*.ts",
+    "src/config/**/*.ts",
+    "src/bin/**/*.ts",
+    "src/**/*.test.ts"
+  ],
+  "exclude": ["node_modules", "dist", "tests", "src/tools/help.ts", "src/tools/structure.test.ts"]
+}

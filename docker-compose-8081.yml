@@ -1,0 +1,80 @@
+# AI Chat Application - Port 8081
+# Note: 'version' field is obsolete in modern Docker Compose, kept for compatibility
+services:
+  backend:
+    build:
+      context: ./ai-chat-backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env-8081
+    container_name: ai-chat-backend-8081
+    environment:
+      - SERVER_PORT=8081
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+    ports:
+      - "8081:8081"
+    networks:
+      - ai-chat-network-8081
+    volumes:
+      - h2-data-8081:/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./ai-chat-frontend
+      dockerfile: Dockerfile
+    container_name: ai-chat-frontend-8081
+    ports:
+      - "8079:80"
+    depends_on:
+      - backend
+    networks:
+      - ai-chat-network-8081
+    restart: unless-stopped
+
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: tei-reranker-8081
+    ports:
+      - "8099:80"
+    volumes:
+      - ./models:/data
+    command: --model-id BAAI/bge-reranker-v2-m3
+    networks:
+      - ai-chat-network-8081
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 9G
+
+  ollama:
+    image: ollama/ollama:0.5.4
+    container_name: ollama-8081
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama-data-8081:/root/.ollama
+    networks:
+      - ai-chat-network-8081
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+networks:
+  ai-chat-network-8081:
+    driver: bridge
+
+volumes:
+  h2-data-8081:
+  ollama-data-8081:

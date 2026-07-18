@@ -1,0 +1,121 @@
+.source-citation {
+  margin-top: 20px;
+  font-size: 13px;
+  border-top: 2px solid #e8e8e8;
+  padding-top: 16px;
+}
+
+.source-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.source-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.source-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: linear-gradient(to bottom, #ffffff, #f8f9fa);
+  border: 1px solid #e0e0e0;
+  border-left: 4px solid #667eea;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.source-item:hover {
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+  transform: translateX(2px);
+}
+
+.source-number {
+  font-weight: 700;
+  font-size: 16px;
+  color: #667eea;
+  background: #f0f2ff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.source-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-title {
+  display: block;
+  color: #2c3e50;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.source-section {
+  color: #7f8c8d;
+  font-size: 12px;
+  margin-bottom: 6px;
+  font-style: italic;
+}
+
+.source-metrics {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.metric {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.metric.similarity {
+  background-color: #e8f5e9;
+  color: #27ae60;
+}
+
+.metric.rerank {
+  background-color: #fff3e0;
+  color: #f39c12;
+}
+
+.source-search-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.source-search-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  color: white;
+}
+
+.source-search-btn:active {
+  transform: translateY(0);
+}

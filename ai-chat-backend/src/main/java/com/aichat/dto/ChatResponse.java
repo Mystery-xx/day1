@@ -1,14 +1,70 @@
 package com.aichat.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import java.util.Map;
+import java.util.List;
+import com.aichat.dto.TaskStateDTO;
+
 public class ChatResponse {
     private String content;
     private String error;
+    private String model;
+    private Map<String, Object> usage;
+    
+    @JsonProperty("debugRequest")
+    private Object debugRequest;
+    
+    @JsonProperty("debugResponse")
+    private Object debugResponse;
+    
+    @JsonProperty("debugSummaryRequest")
+    private Object debugSummaryRequest;
+    
+    @JsonProperty("debugSummaryResponse")
+    private Object debugSummaryResponse;
+    
+    @JsonProperty("debugStickyFacts")
+    private Object debugStickyFacts;
+    
+    @JsonProperty("stickyFactsUpdated")
+    private Boolean stickyFactsUpdated;
+    
+    @JsonProperty("sessionTotalPromptTokens")
+    private Integer sessionTotalPromptTokens;
+    
+    @JsonProperty("sessionTotalCompletionTokens")
+    private Integer sessionTotalCompletionTokens;
+    
+    @JsonProperty("sessionTotalTokens")
+    private Integer sessionTotalTokens;
+    
+    @JsonProperty("toolCalls")
+    private List<Map<String, Object>> toolCalls;
+    
+    @JsonProperty("toolResults")
+    private List<Map<String, Object>> toolResults;
+    
+    @JsonProperty("sources")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private List<SourceInfo> sources;
+
+    @JsonProperty("taskState")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private TaskStateDTO taskState;
 
     public ChatResponse() {}
 
     public ChatResponse(String content, String error) {
         this.content = content;
         this.error = error;
+    }
+
+    public ChatResponse(String content, String error, String model, Map<String, Object> usage) {
+        this.content = content;
+        this.error = error;
+        this.model = model;
+        this.usage = usage;
     }
 
     public static ChatResponse success(String content) {
@@ -33,5 +89,125 @@ public class ChatResponse {
 
     public void setError(String error) {
         this.error = error;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public Map<String, Object> getUsage() {
+        return usage;
+    }
+
+    public void setUsage(Map<String, Object> usage) {
+        this.usage = usage;
+    }
+
+    public Object getDebugRequest() {
+        return debugRequest;
+    }
+
+    public void setDebugRequest(Object debugRequest) {
+        this.debugRequest = debugRequest;
+    }
+
+    public Object getDebugResponse() {
+        return debugResponse;
+    }
+
+    public void setDebugResponse(Object debugResponse) {
+        this.debugResponse = debugResponse;
+    }
+
+    public Object getDebugSummaryRequest() {
+        return debugSummaryRequest;
+    }
+
+    public void setDebugSummaryRequest(Object debugSummaryRequest) {
+        this.debugSummaryRequest = debugSummaryRequest;
+    }
+
+    public Object getDebugSummaryResponse() {
+        return debugSummaryResponse;
+    }
+
+    public void setDebugSummaryResponse(Object debugSummaryResponse) {
+        this.debugSummaryResponse = debugSummaryResponse;
+    }
+
+    public Object getDebugStickyFacts() {
+        return debugStickyFacts;
+    }
+
+    public void setDebugStickyFacts(Object debugStickyFacts) {
+        this.debugStickyFacts = debugStickyFacts;
+    }
+
+    public Boolean getStickyFactsUpdated() {
+        return stickyFactsUpdated;
+    }
+
+    public void setStickyFactsUpdated(Boolean stickyFactsUpdated) {
+        this.stickyFactsUpdated = stickyFactsUpdated;
+    }
+
+    public Integer getSessionTotalPromptTokens() {
+        return sessionTotalPromptTokens;
+    }
+
+    public void setSessionTotalPromptTokens(Integer sessionTotalPromptTokens) {
+        this.sessionTotalPromptTokens = sessionTotalPromptTokens;
+    }
+
+    public Integer getSessionTotalCompletionTokens() {
+        return sessionTotalCompletionTokens;
+    }
+
+    public void setSessionTotalCompletionTokens(Integer sessionTotalCompletionTokens) {
+        this.sessionTotalCompletionTokens = sessionTotalCompletionTokens;
+    }
+
+    public Integer getSessionTotalTokens() {
+        return sessionTotalTokens;
+    }
+
+    public void setSessionTotalTokens(Integer sessionTotalTokens) {
+        this.sessionTotalTokens = sessionTotalTokens;
+    }
+
+    public List<Map<String, Object>> getToolCalls() {
+        return toolCalls;
+    }
+
+    public void setToolCalls(List<Map<String, Object>> toolCalls) {
+        this.toolCalls = toolCalls;
+    }
+
+    public List<Map<String, Object>> getToolResults() {
+        return toolResults;
+    }
+
+    public void setToolResults(List<Map<String, Object>> toolResults) {
+        this.toolResults = toolResults;
+    }
+
+    public List<SourceInfo> getSources() {
+        return sources;
+    }
+
+    public void setSources(List<SourceInfo> sources) {
+        this.sources = sources;
+    }
+
+    public TaskStateDTO getTaskState() {
+        return taskState;
+    }
+
+    public void setTaskState(TaskStateDTO taskState) {
+        this.taskState = taskState;
     }
 }

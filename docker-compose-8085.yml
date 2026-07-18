@@ -1,0 +1,44 @@
+# AI Chat Application - Port 8085
+# Note: 'version' field is obsolete in modern Docker Compose, kept for compatibility
+services:
+  backend:
+    build:
+      context: ./ai-chat-backend
+      dockerfile: Dockerfile
+    container_name: ai-chat-backend-8085
+    environment:
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_API_URL=${AI_API_URL}
+      - AI_MODEL=${AI_MODEL}
+      - AI_PROVIDER=${AI_PROVIDER:-gpustack}
+      - GPUSTACK_API_URL=${GPUSTACK_API_URL:-}
+      - HUGGINGFACE_API_URL=${HUGGINGFACE_API_URL:-}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - SERVER_PORT=8085
+    ports:
+      - "8085:8085"
+    networks:
+      - ai-chat-network-8085
+    volumes:
+      - h2-data-8085:/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./ai-chat-frontend
+      dockerfile: Dockerfile
+    container_name: ai-chat-frontend-8085
+    ports:
+      - "8086:80"
+    depends_on:
+      - backend
+    networks:
+      - ai-chat-network-8085
+    restart: unless-stopped
+
+networks:
+  ai-chat-network-8085:
+    driver: bridge
+
+volumes:
+  h2-data-8085:

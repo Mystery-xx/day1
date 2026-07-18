@@ -1,18 +1,48 @@
 # Note: 'version' field is obsolete in modern Docker Compose, kept for compatibility
 services:
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - frontend-net
+    volumes:
+      - ./ai-chat-frontend/dist:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
   backend:
     build:
       context: ./ai-chat-backend
       dockerfile: Dockerfile
     container_name: ai-chat-backend
+    ports:
+      - "8082:8082"
     environment:
       - AI_API_KEY=${AI_API_KEY}
       - AI_API_URL=${AI_API_URL}
       - AI_MODEL=${AI_MODEL}
-    ports:
-      - "8080:8080"
+      - AI_PROVIDER=${AI_PROVIDER:-gpustack}
+      - GPUSTACK_API_URL=${GPUSTACK_API_URL:-}
+      - HUGGINGFACE_API_URL=${HUGGINGFACE_API_URL:-}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - RAG_OLLAMA_BASE_URL=${RAG_OLLAMA_BASE_URL:-http://ollama:11434}
+      - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Djava.io.flushonnewline=true
+      - ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://localhost:5173
     networks:
-      - ai-chat-network
+      - frontend-net
+      - backend-net
+    volumes:
+      - h2-data:/data
+      - rag-index:/data/rag-index
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   frontend:
@@ -20,14 +50,79 @@ services:
       context: ./ai-chat-frontend
       dockerfile: Dockerfile
     container_name: ai-chat-frontend
-    ports:
-      - "5173:80"
     depends_on:
       - backend
     networks:
-      - ai-chat-network
+      - frontend-net
+    restart: unless-stopped
+
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: tei-reranker
+    volumes:
+      - ./models:/data
+    command: --model-id BAAI/bge-reranker-v2-m3
+    networks:
+      - backend-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 9G
+
+  ollama:
+    image: ollama/ollama:0.5.4
+    container_name: ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - backend-net
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_VULKAN=false
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  mcp-assistant:
+    build:
+      context: ./mcp-assistant
+      dockerfile: Dockerfile
+    container_name: mcp-assistant
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - INDEX_ROOT=/app/.index
+      - REPO_ROOT=/app/repo
+    networks:
+      - frontend-net
+      - backend-net
+    volumes:
+      - mcp-index:/app/.index
+      - ./mcp-assistant/repo:/app/repo
+      - /mnt/f/git/day1:/app/repo/day1:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
 networks:
-  ai-chat-network:
+  frontend-net:
     driver: bridge
+  backend-net:
+    driver: bridge
+    internal: true
+
+volumes:
+  h2-data:
+  rag-index:
+  ollama-data:
+  mcp-index:

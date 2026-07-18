@@ -7,11 +7,18 @@ COPY src ./src
 
 RUN mvn clean package -DskipTests
 
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
 COPY --from=build /app/target/*.jar app.jar
+
+RUN groupadd -r aichat && useradd -r -g aichat aichat
+RUN chown -R aichat:aichat /app
+USER aichat
+
+ENV LANG=C.UTF-8
+ENV JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8"
 
 EXPOSE 8080
 

@@ -1,0 +1,20 @@
+{
+  "projects": {
+    "test-documents-mrmmeerz": {
+      "name": "test-documents",
+      "rootPath": "/tmp/test-documents",
+      "lastIndexed": "2026-07-15T21:56:52.974Z",
+      "chunkingStrategy": "SEMANTIC",
+      "createdAt": "2026-07-15T21:56:52.942Z",
+      "id": "test-documents-mrmmeerz"
+    },
+    "day1-repo-mrmmeeu8": {
+      "name": "day1-repo",
+      "rootPath": "/mnt/f/git/day1",
+      "lastIndexed": null,
+      "chunkingStrategy": "SEMANTIC",
+      "createdAt": "2026-07-15T21:56:53.023Z",
+      "id": "day1-repo-mrmmeeu8"
+    }
+  }
+}

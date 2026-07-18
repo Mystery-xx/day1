@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8082}
   address: 0.0.0.0
   tomcat:
     async-request-timeout: 120000
@@ -8,16 +8,103 @@ spring:
   application:
     name: ai-chat
   webflux:
-    connect-timeout: 30000
-    response-timeout: 120000
+    max-in-memory-size: 16MB
+  datasource:
+    url: jdbc:h2:file:./data/chatdb
+    driverClassName: org.h2.Driver
+    username: sa
+    password: 
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
 
 ai:
   api:
+    provider: ${AI_PROVIDER:gpustack}
     key: ${AI_API_KEY}
     url: ${AI_API_URL}
-    model: ${AI_MODEL}
+    gpustack-url: ${GPUSTACK_API_URL:}
+    huggingface-url: ${HUGGINGFACE_API_URL:}
+    huggingface-token: ${HUGGINGFACE_TOKEN:}
+    model: ${AI_MODEL:}
+    temperature: ${AI_TEMPERATURE:0.7}
+    max-tokens: ${AI_MAX_TOKENS:4096}
+    top-p: ${AI_TOP_P:1.0}
+    frequency-penalty: ${AI_FREQUENCY_PENALTY:0.0}
+    presence-penalty: ${AI_PRESENCE_PENALTY:0.0}
+    stop: ${AI_STOP:}
+    history-limit: ${AI_HISTORY_LIMIT:10}
+
+taskstate:
+  extraction:
+    model: ${TASKSTATE_EXTRACTION_MODEL:}
 
 logging:
   level:
     com.aichat: DEBUG
     org.springframework.web: INFO
+
+  ai:
+    mcp:
+      client:
+        enabled: true
+        name: ai-chat-mcp
+        toolcallback:
+          enabled: true
+
+spring.main:
+  allow-bean-definition-overriding: true
+  web-application-type: servlet
+
+spring.ai:
+  retry:
+    enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env,configprops
+  endpoint:
+    health:
+      show-details: always
+    env:
+      show-values: always
+    configprops:
+      show-values: always
+
+rag:
+  chunking:
+    strategy: SEMANTIC
+    fixed-size: 500
+    overlap: 50
+    semantic-max: 1000
+  eclipse-store:
+    storage-path: /data/rag-index
+    hnsw:
+      m: 16
+      ef-construction: 200
+      ef-search: 50
+  ollama:
+    base-url: ${OLLAMA_BASE_URL:http://host.docker.internal:11434}
+    api-url: ${OLLAMA_API_URL:http://host.docker.internal:11434}
+    model: ${OLLAMA_MODEL:llama3.2}
+  query-rewrite:
+    enabled: ${RAG_QUERY_REWRITE_ENABLED:true}
+    model: ${RAG_QUERY_REWRITE_MODEL:default-chat}
+    timeout-seconds: ${RAG_QUERY_REWRITE_TIMEOUT:2}
+  rerank:
+    enabled: ${RAG_RERANK_ENABLED:false}
+    base-url: ${TEI_RERANKER_URL:http://tei-reranker:80}
+    top-k-before: ${RAG_RERANK_TOP_K_BEFORE:20}
+    top-k-after: ${RAG_RERANK_TOP_K_AFTER:10}
+    threshold: ${RAG_RERANK_THRESHOLD:0.0}
