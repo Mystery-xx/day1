@@ -96,25 +96,28 @@ jobs:
           
           # Start backend in background
           echo "=== Starting backend ==="
-          java -jar target/ai-chat-backend-0.0.1-SNAPSHOT.jar > /tmp/backend.log 2>&1 &
+          echo "Environment: AI_API_KEY=${AI_API_KEY:0:3}***, AI_API_URL=$AI_API_URL, AI_MODEL=$AI_MODEL"
+          java -Xmx512m -jar target/ai-chat-backend-0.0.1-SNAPSHOT.jar > /tmp/backend.log 2>&1 &
           BACKEND_PID=$!
           echo "Backend PID: $BACKEND_PID"
           
           # Wait for backend to start
           echo "=== Waiting for backend ==="
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             if curl -sf http://localhost:8082/api/chat/health > /dev/null 2>&1; then
               echo "Backend is ready after ${i}s"
               break
             fi
-            echo "Waiting for backend... ($i/30)"
+            echo "Waiting for backend... ($i/60)"
             sleep 2
           done
           
           # Check if backend is actually running
           if ! curl -sf http://localhost:8082/api/chat/health > /dev/null 2>&1; then
             echo "ERROR: Backend failed to start"
-            echo "=== Backend log ==="
+            echo "=== Backend log (last 50 lines) ==="
+            tail -50 /tmp/backend.log
+            echo "=== Full backend log ==="
             cat /tmp/backend.log
             exit 1
           fi
