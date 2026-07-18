@@ -40,16 +40,24 @@ jobs:
           git fetch origin ${{ github.base_ref }}:${{ github.base_ref }} || true
           git fetch origin ${{ github.head_ref }}:${{ github.head_ref }} || true
           
-          # Get diff between base and head
-          git diff ${{ github.base_ref }}..${{ github.head_ref }} > /tmp/ai-review/diff.patch || {
-            echo "WARNING: git diff failed, creating empty diff"
-            echo "" > /tmp/ai-review/diff.patch
-          }
-          
-          # Get changed files
+          # Get changed files first, filter to text files only
           git diff --name-only ${{ github.base_ref }}..${{ github.head_ref }} | \
+            grep -E '\.(java|js|jsx|ts|tsx|py|md|yml|yaml|json|xml|sh)$' | \
             python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" \
             > /tmp/ai-review/changed-files.json || echo '[]' > /tmp/ai-review/changed-files.json
+          
+          # Get diff only for filtered files
+          CHANGED_FILES=$(cat /tmp/ai-review/changed-files.json)
+          if [ "$CHANGED_FILES" = "[]" ]; then
+            echo "No relevant text files changed, creating empty diff"
+            echo "" > /tmp/ai-review/diff.patch
+          else
+            # Pass files to git diff via stdin
+            echo "$CHANGED_FILES" | python3 -c "import sys,json; files=json.load(sys.stdin); print(' '.join([':'+f for f in files]))" | xargs git diff ${{ github.base_ref }}..${{ github.head_ref }} -- > /tmp/ai-review/diff.patch || {
+              echo "WARNING: git diff failed, creating empty diff"
+              echo "" > /tmp/ai-review/diff.patch
+            }
+          fi
           
           DIFF_SIZE=$(wc -c < /tmp/ai-review/diff.patch)
           echo "diff_size=$DIFF_SIZE" >> $GITHUB_OUTPUT
