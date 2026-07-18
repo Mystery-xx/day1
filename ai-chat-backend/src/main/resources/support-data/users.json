@@ -1,0 +1,26 @@
+[
+  {
+    "userId": "user-1",
+    "email": "john@example.com",
+    "name": "John Doe",
+    "company": "Acme Corp",
+    "plan": "PRO",
+    "createdAt": "2026-01-15T00:00:00"
+  },
+  {
+    "userId": "user-2",
+    "email": "jane@techcorp.io",
+    "name": "Jane Smith",
+    "company": "TechCorp",
+    "plan": "ENTERPRISE",
+    "createdAt": "2026-02-20T00:00:00"
+  },
+  {
+    "userId": "user-3",
+    "email": "bob@startup.com",
+    "name": "Bob Johnson",
+    "company": "Startup Inc",
+    "plan": "FREE",
+    "createdAt": "2026-06-01T00:00:00"
+  }
+]

@@ -1,0 +1,47 @@
+[
+  {
+    "ticketId": "TKT-001",
+    "userId": "user-1",
+    "subject": "Не работает авторизация",
+    "status": "OPEN",
+    "priority": "HIGH",
+    "description": "Пользователь сообщает об ошибке 'Invalid credentials' при входе",
+    "createdAt": "2026-07-18T10:30:00"
+  },
+  {
+    "ticketId": "TKT-002",
+    "userId": "user-2",
+    "subject": "Вопрос по API rate limits",
+    "status": "PENDING",
+    "priority": "MEDIUM",
+    "description": "Запрос информации о лимитах запросов к API",
+    "createdAt": "2026-07-18T09:15:00"
+  },
+  {
+    "ticketId": "TKT-003",
+    "userId": "user-1",
+    "subject": "Сброс пароля",
+    "status": "CLOSED",
+    "priority": "LOW",
+    "description": "Запрос на сброс пароля",
+    "createdAt": "2026-07-17T14:20:00"
+  },
+  {
+    "ticketId": "TKT-004",
+    "userId": "user-3",
+    "subject": "Ошибка 500 при загрузке файлов",
+    "status": "IN_PROGRESS",
+    "priority": "CRITICAL",
+    "description": "Сервер возвращает 500 ошибку при загрузке файлов больше 10MB",
+    "createdAt": "2026-07-18T11:45:00"
+  },
+  {
+    "ticketId": "TKT-005",
+    "userId": "user-2",
+    "subject": "Документация MCP",
+    "status": "OPEN",
+    "priority": "LOW",
+    "description": "Запрос документации по интеграции MCP",
+    "createdAt": "2026-07-18T08:00:00"
+  }
+]
