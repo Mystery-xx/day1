@@ -13,7 +13,17 @@ public class DiffContext {
     private String commitSha;
     private String ragContext;
 
+    /** Chunk index (0-based). Set to 0 for single-chunk (non-chunked) requests. */
+    private int chunkIndex;
+    /** Total number of chunks. Set to 1 for single-chunk (non-chunked) requests. */
+    private int totalChunks;
+    /** Whether this is the last chunk. True for single-chunk requests. */
+    private boolean isLastChunk;
+
     public DiffContext() {
+        this.chunkIndex = 0;
+        this.totalChunks = 1;
+        this.isLastChunk = true;
     }
 
     public DiffContext(String unifiedDiff, List<FileChange> changedFiles,
@@ -23,6 +33,9 @@ public class DiffContext {
         this.prNumber = prNumber;
         this.repo = repo;
         this.commitSha = commitSha;
+        this.chunkIndex = 0;
+        this.totalChunks = 1;
+        this.isLastChunk = true;
     }
 
     public String getUnifiedDiff() {
@@ -71,5 +84,29 @@ public class DiffContext {
 
     public void setRagContext(String ragContext) {
         this.ragContext = ragContext;
+    }
+
+    public int getChunkIndex() {
+        return chunkIndex;
+    }
+
+    public void setChunkIndex(int chunkIndex) {
+        this.chunkIndex = chunkIndex;
+    }
+
+    public int getTotalChunks() {
+        return totalChunks;
+    }
+
+    public void setTotalChunks(int totalChunks) {
+        this.totalChunks = totalChunks;
+    }
+
+    public boolean isLastChunk() {
+        return isLastChunk;
+    }
+
+    public void setLastChunk(boolean lastChunk) {
+        isLastChunk = lastChunk;
     }
 }

@@ -108,4 +108,41 @@ public class ReviewResult {
             }
         }
     }
+
+    /**
+     * Merge multiple ReviewResult objects into a single aggregated result.
+     * Combines findings, token usage, review time, and failed agents.
+     * Re-computes severityCounts from the merged findings.
+     */
+    public static ReviewResult merge(List<ReviewResult> results) {
+        ReviewResult merged = new ReviewResult();
+        if (results == null || results.isEmpty()) {
+            return merged;
+        }
+
+        List<Finding> allFindings = new ArrayList<>();
+        int totalTokenUsage = 0;
+        long totalReviewTimeMs = 0;
+        List<String> allFailedAgents = new ArrayList<>();
+
+        for (ReviewResult r : results) {
+            if (r == null) continue;
+            if (r.getFindings() != null) {
+                allFindings.addAll(r.getFindings());
+            }
+            totalTokenUsage += r.getTokenUsage();
+            totalReviewTimeMs += r.getReviewTimeMs();
+            if (r.getFailedAgents() != null) {
+                allFailedAgents.addAll(r.getFailedAgents());
+            }
+        }
+
+        merged.setFindings(allFindings);
+        merged.setTokenUsage(totalTokenUsage);
+        merged.setReviewTimeMs(totalReviewTimeMs);
+        merged.setFailedAgents(allFailedAgents);
+        merged.setPartialSuccess(!allFailedAgents.isEmpty());
+
+        return merged;
+    }
 }
