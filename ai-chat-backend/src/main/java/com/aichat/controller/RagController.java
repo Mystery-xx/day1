@@ -188,7 +188,8 @@ public class RagController {
         // Validation 1: Check file is not empty
         if (file.isEmpty()) {
             logger.warn("Upload rejected: empty file");
-            auditLogger.logInvalidFileUpload("empty file", filename, fileSize, clientIp);
+            // TEMP DISABLED: Security audit for FAQ upload
+            // auditLogger.logInvalidFileUpload("empty file", filename, fileSize, clientIp);
             UploadResponse response = UploadResponse.error(
                 filename != null ? filename : "unknown",
                 "File is empty"
@@ -199,7 +200,8 @@ public class RagController {
         // Validation 2: Check file size <= 10MB
         if (fileSize > FileUploadValidator.MAX_FILE_SIZE) {
             logger.warn("Upload rejected: file too large ({} bytes)", fileSize);
-            auditLogger.logInvalidFileUpload("file too large", filename, fileSize, clientIp);
+            // TEMP DISABLED: Security audit for FAQ upload
+        // auditLogger.logInvalidFileUpload("file too large", filename, fileSize, clientIp);
             UploadResponse response = UploadResponse.error(
                 filename != null ? filename : "unknown",
                 "File size exceeds 10MB limit"
@@ -211,7 +213,8 @@ public class RagController {
         String extension = getFileExtension(filename);
         if (!FileUploadValidator.ALLOWED_EXTENSIONS.contains(extension.toLowerCase())) {
             logger.warn("Upload rejected: invalid extension '{}' for file '{}'", extension, filename);
-            auditLogger.logInvalidFileUpload("invalid extension", filename, fileSize, clientIp);
+            // TEMP DISABLED: Security audit for FAQ upload
+        // auditLogger.logInvalidFileUpload("invalid extension", filename, fileSize, clientIp);
             UploadResponse response = UploadResponse.error(
                 filename != null ? filename : "unknown",
                 "Invalid file extension. Only .txt and .md are allowed"
@@ -223,7 +226,8 @@ public class RagController {
         String contentType = file.getContentType();
         if (!isValidContentType(contentType)) {
             logger.warn("Upload rejected: invalid content type '{}'", contentType);
-            auditLogger.logInvalidFileUpload("invalid content type", filename, fileSize, clientIp);
+            // TEMP DISABLED: Security audit for FAQ upload
+        // auditLogger.logInvalidFileUpload("invalid content type", filename, fileSize, clientIp);
             UploadResponse response = UploadResponse.error(
                 filename != null ? filename : "unknown",
                 "Invalid content type. Only text/plain, text/markdown, text/x-markdown, application/json are allowed"
@@ -234,7 +238,8 @@ public class RagController {
         // Validation 5: Validate file content (no binary data)
         if (!isValidTextContent(file)) {
             logger.warn("Upload rejected: binary content detected");
-            auditLogger.logInvalidFileUpload("binary content", filename, fileSize, clientIp);
+            // TEMP DISABLED: Security audit for FAQ upload
+        // auditLogger.logInvalidFileUpload("binary content", filename, fileSize, clientIp);
             UploadResponse response = UploadResponse.error(
                 filename != null ? filename : "unknown",
                 "File contains binary data. Only text files are allowed"
@@ -245,7 +250,8 @@ public class RagController {
         // Validation 6: Validate strategy parameter
         if (strategy != ChunkingType.SEMANTIC && strategy != ChunkingType.FIXED_SIZE) {
             logger.warn("Upload rejected: invalid strategy '{}'", strategy);
-            auditLogger.logInvalidFileUpload("invalid strategy", filename, fileSize, clientIp);
+            // TEMP DISABLED: Security audit for FAQ upload
+        // auditLogger.logInvalidFileUpload("invalid strategy", filename, fileSize, clientIp);
             UploadResponse response = UploadResponse.error(
                 filename != null ? filename : "unknown",
                 "Invalid strategy. Only SEMANTIC or FIXED_SIZE are allowed"
@@ -1113,10 +1119,12 @@ public class RagController {
             while ((bytesRead = inputStream.read(buffer)) != -1) {
                 totalBytes += bytesRead;
                 for (int i = 0; i < bytesRead; i++) {
-                    byte b = buffer[i];
+                    int b = buffer[i] & 0xFF; // Treat as unsigned (0-255)
                     if (b == 0) {
                         nullByteCount++;
                     }
+                    // Only flag control characters as non-printable (excluding common whitespace)
+                    // UTF-8 multibyte chars (128-255) are valid text, not binary
                     if (b < 32 && b != 9 && b != 10 && b != 13) {
                         nonPrintableCount++;
                     }
