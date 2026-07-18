@@ -1,0 +1,131 @@
+name: AI Code Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-code-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI
+        run: |
+          type gh >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y gh; }
+          gh --version
+
+      - name: Extract PR diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/ai-review
+          ./scripts/extract-pr-diff.sh ${{ github.event.pull_request.number }} /tmp/ai-review
+          echo "diff_size=$(wc -c < /tmp/ai-review/diff.patch)" >> $GITHUB_OUTPUT
+
+      - name: Build RAG context
+        run: |
+          pip install -q urllib3
+          # RAG endpoint will be available when backend runs alongside
+          # For now, create empty context as fallback
+          echo "# RAG Context for Code Review" > /tmp/ai-review/rag-context.md
+          echo "" >> /tmp/ai-review/rag-context.md
+          echo "*No RAG context available. Using generic review prompts.*" >> /tmp/ai-review/rag-context.md
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Start backend and run review
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_URL: ${{ secrets.AI_API_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'gpustack' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Build backend
+          cd ai-chat-backend
+          mvn -B package -DskipTests -q
+          
+          # Start backend in background
+          java -jar target/ai-chat-backend-0.0.1-SNAPSHOT.jar &
+          BACKEND_PID=$!
+          echo "Backend PID: $BACKEND_PID"
+          
+          # Wait for backend to start
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8081/api/chat/health > /dev/null 2>&1; then
+              echo "Backend is ready"
+              break
+            fi
+            echo "Waiting for backend... ($i/30)"
+            sleep 2
+          done
+          
+          # Read diff content
+          DIFF_CONTENT=$(cat /tmp/ai-review/diff.patch | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+          CHANGED_FILES=$(cat /tmp/ai-review/changed-files.json)
+          
+          # Call code review API
+          REVIEW_RESULT=$(curl -s -X POST http://localhost:8081/api/code-review/analyze \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"unifiedDiff\": $DIFF_CONTENT,
+              \"changedFiles\": $CHANGED_FILES,
+              \"prNumber\": ${{ github.event.pull_request.number }},
+              \"repo\": \"${{ github.repository }}\",
+              \"commitSha\": \"${{ github.event.pull_request.head.sha }}\"
+            }")
+          
+          # Save review result
+          echo "$REVIEW_RESULT" > /tmp/ai-review/review-result.json
+          
+          # Stop backend
+          kill $BACKEND_PID 2>/dev/null || true
+          
+          echo "Review complete"
+          cd ..
+
+      - name: Format and post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Format review result and post as PR comment
+          python3 scripts/format-review-comment.py /tmp/ai-review/review-result.json /tmp/ai-review/comment.md
+          
+          # Post comment to PR
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/ai-review/comment.md
+          
+          echo "Review comment posted to PR #${{ github.event.pull_request.number }}"
+
+      - name: Collect metrics
+        if: always()
+        run: |
+          mkdir -p .github
+          python3 scripts/collect-metrics.py /tmp/ai-review/review-result.json .github/ai-review-metrics.jsonl
+
+      - name: Fallback - post unavailable notice
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/ai-review/fallback-comment.md << 'EOF'
+          ## 🤖 AI Code Review
+
+          **Status**: ❌ Review unavailable
+
+          The AI code review service encountered an error. Please review manually.
+
+          _Retry by pushing a new commit to this PR._
+          EOF
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/ai-review/fallback-comment.md || true
