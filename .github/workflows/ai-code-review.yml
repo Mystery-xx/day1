@@ -1,0 +1,178 @@
+name: AI Code Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-code-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gh
+          gh --version
+
+      - name: Extract PR diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x scripts/extract-pr-diff.sh
+          mkdir -p /tmp/ai-review
+          
+          # Debug: show PR info
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Base branch: ${{ github.base_ref }}"
+          echo "Head branch: ${{ github.head_ref }}"
+          
+          # Use git diff instead of gh pr diff (more reliable)
+          echo "=== Getting diff via git ==="
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }} || true
+          git fetch origin ${{ github.head_ref }}:${{ github.head_ref }} || true
+          
+          # Get changed files first, filter to text files only
+          git diff --name-only ${{ github.base_ref }}..${{ github.head_ref }} | \
+            grep -E '\.(java|js|jsx|ts|tsx|py|md|yml|yaml|json|xml|sh)$' | \
+            python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" \
+            > /tmp/ai-review/changed-files.json || echo '[]' > /tmp/ai-review/changed-files.json
+          
+          # Get diff only for filtered files
+          CHANGED_FILES=$(cat /tmp/ai-review/changed-files.json)
+          if [ "$CHANGED_FILES" = "[]" ]; then
+            echo "No relevant text files changed, creating empty diff"
+            echo "" > /tmp/ai-review/diff.patch
+          else
+            # Pass files to git diff via stdin
+            echo "$CHANGED_FILES" | python3 -c "import sys,json; files=json.load(sys.stdin); print(' '.join([':'+f for f in files]))" | xargs git diff ${{ github.base_ref }}..${{ github.head_ref }} -- > /tmp/ai-review/diff.patch || {
+              echo "WARNING: git diff failed, creating empty diff"
+              echo "" > /tmp/ai-review/diff.patch
+            }
+          fi
+          
+          DIFF_SIZE=$(wc -c < /tmp/ai-review/diff.patch)
+          echo "diff_size=$DIFF_SIZE" >> $GITHUB_OUTPUT
+          echo "Diff size: ${DIFF_SIZE} bytes"
+          echo "Changed files: $(cat /tmp/ai-review/changed-files.json)"
+
+      - name: Build RAG context
+        run: |
+          pip install -q urllib3
+          # RAG endpoint will be available when backend runs alongside
+          # For now, create empty context as fallback
+          echo "# RAG Context for Code Review" > /tmp/ai-review/rag-context.md
+          echo "" >> /tmp/ai-review/rag-context.md
+          echo "*No RAG context available. Using generic review prompts.*" >> /tmp/ai-review/rag-context.md
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Start backend and run review
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_URL: ${{ secrets.AI_API_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'gpustack' }}
+          SERVER_PORT: 8082
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Build backend
+          cd ai-chat-backend
+          echo "=== Building backend ==="
+          if ! mvn -B package -DskipTests; then
+            echo "ERROR: Maven build failed"
+            exit 1
+          fi
+          echo "=== Maven build completed ==="
+          
+          # Start backend in background
+          echo "=== Starting backend ==="
+          echo "Environment: AI_API_KEY=${AI_API_KEY:0:3}***, AI_API_URL=$AI_API_URL, AI_MODEL=$AI_MODEL"
+          java -Xmx512m -jar target/ai-chat-backend-0.0.1-SNAPSHOT.jar > /tmp/backend.log 2>&1 &
+          BACKEND_PID=$!
+          echo "Backend PID: $BACKEND_PID"
+          
+          # Wait for backend to start
+          echo "=== Waiting for backend ==="
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8082/api/chat/health > /dev/null 2>&1; then
+              echo "Backend is ready after ${i}s"
+              break
+            fi
+            echo "Waiting for backend... ($i/60)"
+            sleep 2
+          done
+          
+          # Check if backend is actually running
+          if ! curl -sf http://localhost:8082/api/chat/health > /dev/null 2>&1; then
+            echo "ERROR: Backend failed to start"
+            echo "=== Backend log (last 50 lines) ==="
+            tail -50 /tmp/backend.log
+            echo "=== Full backend log ==="
+            cat /tmp/backend.log
+            exit 1
+          fi
+          
+          # Call code review API using dedicated script
+          cd /home/runner/work/day1/day1
+          echo "=== Calling code review API ==="
+          chmod +x scripts/call-review-api.py
+          if ! python3 scripts/call-review-api.py; then
+            echo "ERROR: Code review API call failed"
+            echo "=== Backend log ==="
+            tail -50 /tmp/backend.log
+            exit 1
+          fi
+          
+          # Stop backend
+          echo "=== Stopping backend ==="
+          kill $BACKEND_PID 2>/dev/null || true
+          
+          cd ai-chat-backend
+
+      - name: Format and post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Format review result and post as PR comment
+          python3 scripts/format-review-comment.py /tmp/ai-review/review-result.json /tmp/ai-review/comment.md
+          
+          # Post comment to PR
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/ai-review/comment.md
+          
+          echo "Review comment posted to PR #${{ github.event.pull_request.number }}"
+
+      - name: Collect metrics
+        if: always()
+        run: |
+          mkdir -p .github
+          python3 scripts/collect-metrics.py /tmp/ai-review/review-result.json .github/ai-review-metrics.jsonl
+
+      - name: Fallback - post unavailable notice
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/ai-review/fallback-comment.md << 'EOF'
+          ## 🤖 AI Code Review
+
+          **Status**: ❌ Review unavailable
+
+          The AI code review service encountered an error. Please review manually.
+
+          _Retry by pushing a new commit to this PR._
+          EOF
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/ai-review/fallback-comment.md || true
