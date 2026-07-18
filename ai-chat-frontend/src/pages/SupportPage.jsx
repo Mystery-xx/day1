@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import TicketSelector from '../components/support/TicketSelector'
 import TicketInfo from '../components/support/TicketInfo'
 import SupportChat from '../components/support/SupportChat'
+import NewTicketForm from '../components/support/NewTicketForm'
 
 /**
  * SupportPage — page for managing support tickets and chat conversations.
@@ -129,6 +130,26 @@ function SupportPage() {
     }
   }, [])
 
+  const handleCreateTicket = useCallback(async ({ subject, description, priority }) => {
+    const response = await fetch('/api/support/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, description, priority, userId: 'user1' }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const newTicket = await response.json()
+
+    // Add new ticket to the list and select it
+    setTickets((prev) => [...prev, newTicket])
+    setSelectedTicketId(newTicket.ticketId)
+    setTicket(newTicket)
+    setMessages(newTicket.messages || [])
+  }, [])
+
   return (
     <div className="support-page">
       <div className="page-header" style={{
@@ -202,8 +223,32 @@ function SupportPage() {
           </div>
         )}
 
+        {/* New ticket form */}
+        {!isLoading && selectedTicketId === '__new__' && (
+          <div className="support-layout" style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 2fr',
+            gap: '24px',
+            alignItems: 'start',
+          }}>
+            <div className="support-layout-info">
+              <NewTicketForm
+                onSubmit={handleCreateTicket}
+                onCancel={() => setSelectedTicketId(null)}
+              />
+            </div>
+            <div className="support-layout-chat">
+              <SupportChat
+                ticketId={null}
+                messages={[]}
+                onSendMessage={handleSendMessage}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Main layout: ticket info + chat */}
-        {!isLoading && selectedTicketId && (
+        {!isLoading && selectedTicketId && selectedTicketId !== '__new__' && (
           <div className="support-layout" style={{
             display: 'grid',
             gridTemplateColumns: '1fr 2fr',
@@ -215,7 +260,7 @@ function SupportPage() {
             </div>
             <div className="support-layout-chat">
               <SupportChat
-                ticketId={selectedTicketId === '__new__' ? null : selectedTicketId}
+                ticketId={selectedTicketId}
                 messages={messages}
                 onSendMessage={handleSendMessage}
               />

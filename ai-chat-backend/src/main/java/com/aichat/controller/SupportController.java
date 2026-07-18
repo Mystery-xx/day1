@@ -1,5 +1,6 @@
 package com.aichat.controller;
 
+import com.aichat.dto.support.CreateTicketRequest;
 import com.aichat.dto.support.SupportChatRequest;
 import com.aichat.dto.support.SupportChatResponse;
 import com.aichat.dto.support.TicketDTO;
@@ -124,6 +125,37 @@ public class SupportController {
             return ResponseEntity.ok(tickets);
         } catch (Exception e) {
             logger.error("Error fetching tickets for user: {}", userId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Create a new support ticket.
+     *
+     * @param request The create ticket request containing subject, description, priority, and userId
+     * @return The created TicketDTO
+     */
+    @PostMapping("/tickets")
+    public ResponseEntity<TicketDTO> createTicket(@RequestBody CreateTicketRequest request) {
+        logger.info("Creating new support ticket: subject='{}'", request.getSubject());
+
+        if (request.getSubject() == null || request.getSubject().isBlank()) {
+            logger.warn("Create ticket request with empty subject");
+            return ResponseEntity.badRequest().build();
+        }
+
+        try {
+            String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
+            TicketDTO ticket = ticketService.createTicket(
+                userId,
+                request.getSubject(),
+                request.getDescription() != null ? request.getDescription() : "",
+                request.getPriority()
+            );
+            logger.info("Created support ticket: {}", ticket.getTicketId());
+            return ResponseEntity.ok(ticket);
+        } catch (Exception e) {
+            logger.error("Error creating support ticket", e);
             return ResponseEntity.internalServerError().build();
         }
     }

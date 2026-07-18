@@ -76,7 +76,7 @@ public class TicketService {
             .collect(Collectors.toList());
     }
     
-    public TicketDTO createTicket(String userId, String subject, String description) {
+    public TicketDTO createTicket(String userId, String subject, String description, String priority) {
         String ticketId = "TKT-" + String.format("%03d", tickets.size() + 1);
         TicketDTO ticket = new TicketDTO();
         ticket.setTicketId(ticketId);
@@ -84,7 +84,7 @@ public class TicketService {
         ticket.setSubject(subject);
         ticket.setDescription(description);
         ticket.setStatus(TicketStatus.OPEN.name());
-        ticket.setPriority(TicketPriority.MEDIUM.name());
+        ticket.setPriority(priority != null ? priority : TicketPriority.MEDIUM.name());
         ticket.setCreatedAt(LocalDateTime.now());
         
         SupportUser user = findUserById(userId);
