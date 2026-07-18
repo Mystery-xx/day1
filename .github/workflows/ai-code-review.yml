@@ -18,7 +18,8 @@ jobs:
 
       - name: Install GitHub CLI
         run: |
-          type gh >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y gh; }
+          sudo apt-get update -qq
+          sudo apt-get install -y gh
           gh --version
 
       - name: Extract PR diff
