@@ -446,6 +446,29 @@ function App() {
             </span>
           )}
           <Link
+            to="/support"
+            style={{
+              padding: '8px 16px',
+              fontSize: '13px',
+              fontWeight: '600',
+              textDecoration: 'none',
+              color: 'white',
+              border: '2px solid white',
+              borderRadius: '6px',
+              background: 'rgba(255,255,255,0.2)',
+              transition: 'all 0.2s',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseOver={(e) => {
+              e.target.style.background = 'rgba(255,255,255,0.3)'
+            }}
+            onMouseOut={(e) => {
+              e.target.style.background = 'rgba(255,255,255,0.2)'
+            }}
+          >
+            🎫 Поддержка
+          </Link>
+          <Link
             to="/search"
             style={{
               padding: '8px 16px',

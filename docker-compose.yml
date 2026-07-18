@@ -41,6 +41,7 @@ services:
     volumes:
       - h2-data:/data
       - rag-index:/data/rag-index
+      - ./ai-chat-backend/src/main/resources/support-data:/app/resources/support-data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

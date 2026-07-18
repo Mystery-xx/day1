@@ -6,13 +6,16 @@ import com.aichat.entity.TicketStatus;
 import com.aichat.entity.TicketPriority;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
+import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
-import java.io.File;
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -22,32 +25,39 @@ import java.util.stream.Collectors;
 @Service
 public class TicketService {
     
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
     private final List<TicketDTO> tickets = new CopyOnWriteArrayList<>();
     private final List<SupportUser> users = new CopyOnWriteArrayList<>();
-    private File ticketsFile;
-    private File usersFile;
+    
+    public TicketService() {
+        this.objectMapper = new ObjectMapper();
+        JavaTimeModule javaTimeModule = new JavaTimeModule();
+        DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
+        javaTimeModule.addDeserializer(LocalDateTime.class, new LocalDateTimeDeserializer(formatter));
+        javaTimeModule.addSerializer(LocalDateTime.class, new LocalDateTimeSerializer(formatter));
+        this.objectMapper.registerModule(javaTimeModule);
+    }
     
     @PostConstruct
     public void init() throws IOException {
-        ClassPathResource ticketsResource = new ClassPathResource("support-data/tickets.json");
-        ClassPathResource usersResource = new ClassPathResource("support-data/users.json");
-        
-        ticketsFile = ticketsResource.getFile();
-        usersFile = usersResource.getFile();
-        
         loadTickets();
         loadUsers();
     }
     
     private void loadTickets() throws IOException {
         tickets.clear();
-        tickets.addAll(objectMapper.readValue(ticketsFile, new TypeReference<List<TicketDTO>>() {}));
+        ClassPathResource resource = new ClassPathResource("support-data/tickets.json");
+        try (var is = resource.getInputStream()) {
+            tickets.addAll(objectMapper.readValue(is, new TypeReference<List<TicketDTO>>() {}));
+        }
     }
     
     private void loadUsers() throws IOException {
         users.clear();
-        users.addAll(objectMapper.readValue(usersFile, new TypeReference<List<SupportUser>>() {}));
+        ClassPathResource resource = new ClassPathResource("support-data/users.json");
+        try (var is = resource.getInputStream()) {
+            users.addAll(objectMapper.readValue(is, new TypeReference<List<SupportUser>>() {}));
+        }
     }
     
     public List<TicketDTO> findAll() {
@@ -84,7 +94,6 @@ public class TicketService {
         }
         
         tickets.add(ticket);
-        saveTickets();
         return ticket;
     }
     
@@ -98,13 +107,5 @@ public class TicketService {
             .filter(u -> u.getUserId().equals(userId))
             .findFirst()
             .orElse(null);
-    }
-    
-    private void saveTickets() {
-        try {
-            objectMapper.writeValue(ticketsFile, tickets);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to save tickets", e);
-        }
     }
 }

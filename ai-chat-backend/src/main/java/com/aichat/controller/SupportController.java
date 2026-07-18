@@ -18,7 +18,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/support")
-@CrossOrigin("*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class SupportController {
 
     private static final Logger logger = LoggerFactory.getLogger(SupportController.class);
