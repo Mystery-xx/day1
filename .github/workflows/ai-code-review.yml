@@ -119,28 +119,11 @@ jobs:
             exit 1
           fi
           
-          # Call code review API using file to avoid "argument list too long"
+          # Call code review API using dedicated script
           cd /home/runner/work/day1/day1
           echo "=== Calling code review API ==="
-          
-          # Write Python script using echo commands (heredoc doesn't work in YAML)
-          echo 'import json, urllib.request, sys' > /tmp/ai-review/call_review_api.py
-          echo 'try:' >> /tmp/ai-review/call_review_api.py
-          echo '    with open("/tmp/ai-review/diff.patch", "rb") as f: diff = f.read().decode("utf-8", errors="replace")' >> /tmp/ai-review/call_review_api.py
-          echo '    print(f"Read diff: {len(diff)} chars")' >> /tmp/ai-review/call_review_api.py
-          echo '    with open("/tmp/ai-review/changed-files.json", "r") as f: files = json.load(f)' >> /tmp/ai-review/call_review_api.py
-          echo '    changed_files = [{"filename": n, "additions": 0, "deletions": 0, "isBinary": False} for n in files]' >> /tmp/ai-review/call_review_api.py
-          echo '    print(f"Changed files: {len(changed_files)}")' >> /tmp/ai-review/call_review_api.py
-          echo '    request = {"unifiedDiff": diff, "changedFiles": changed_files, "prNumber": 2, "repo": "Mystery-xx/day1", "commitSha": ""}' >> /tmp/ai-review/call_review_api.py
-          echo '    req = urllib.request.Request("http://localhost:8082/api/code-review/analyze", data=json.dumps(request).encode("utf-8"), headers={"Content-Type": "application/json"})' >> /tmp/ai-review/call_review_api.py
-          echo '    with urllib.request.urlopen(req, timeout=300) as response: result = response.read().decode("utf-8")' >> /tmp/ai-review/call_review_api.py
-          echo '    with open("/tmp/ai-review/review-result.json", "w") as f: f.write(result)' >> /tmp/ai-review/call_review_api.py
-          echo '    print("Review complete")' >> /tmp/ai-review/call_review_api.py
-          echo 'except Exception as e:' >> /tmp/ai-review/call_review_api.py
-          echo '    print(f"ERROR: {e}", file=sys.stderr)' >> /tmp/ai-review/call_review_api.py
-          echo '    sys.exit(1)' >> /tmp/ai-review/call_review_api.py
-          
-          python3 /tmp/ai-review/call_review_api.py
+          chmod +x scripts/call-review-api.py
+          python3 scripts/call-review-api.py || exit 1
           
           # Stop backend
           echo "=== Stopping backend ==="
