@@ -106,9 +106,11 @@ jobs:
           import json
           import urllib.request
           
-          # Read diff from file
-          with open('/tmp/ai-review/diff.patch', 'r') as f:
-              diff = f.read()
+          # Read diff from file (handle binary/non-UTF8 with errors='replace')
+          with open('/tmp/ai-review/diff.patch', 'rb') as f:
+              diff_bytes = f.read()
+          # Decode with replacement for invalid UTF-8 sequences
+          diff = diff_bytes.decode('utf-8', errors='replace')
           
           # Read changed files
           with open('/tmp/ai-review/changed-files.json', 'r') as f:
