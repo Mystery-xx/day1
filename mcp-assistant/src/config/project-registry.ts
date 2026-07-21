@@ -5,8 +5,13 @@ import * as path from 'path';
 // Configuration
 // ============================================================================
 
-const INDEX_DIR = path.join(process.cwd(), '.index');
+const INDEX_DIR = process.env.INDEX_ROOT || path.join(process.cwd(), '.index');
 const PROJECTS_FILE = path.join(INDEX_DIR, 'projects.json');
+
+// Path translation for Docker environments
+// Converts host paths (e.g., /mnt/f/git/day1) to container paths (e.g., /app/repo/day1)
+const HOST_ROOT = process.env.HOST_ROOT || '';
+const CONTAINER_ROOT = process.env.CONTAINER_ROOT || '';
 
 // ============================================================================
 // Types
@@ -62,17 +67,46 @@ function generateProjectId(name: string, existingIds: string[]): string {
 }
 
 /**
+ * Translate a path from host format to container format.
+ * If HOST_ROOT and CONTAINER_ROOT are set, converts host paths to container paths.
+ * Example: HOST_ROOT=/mnt/f/git/day1, CONTAINER_ROOT=/app/repo/day1
+ *          "/mnt/f/git/day1" → "/app/repo/day1"
+ */
+export function translatePath(inputPath: string): string {
+  if (!HOST_ROOT || !CONTAINER_ROOT) {
+    return inputPath;
+  }
+  
+  // Normalize paths for comparison
+  const normalizedHostRoot = HOST_ROOT.replace(/\/$/, '');
+  const normalizedInput = inputPath.replace(/\/$/, '');
+  
+  // If input starts with HOST_ROOT, replace it with CONTAINER_ROOT
+  if (normalizedInput === normalizedHostRoot) {
+    return CONTAINER_ROOT;
+  }
+  
+  if (normalizedInput.startsWith(normalizedHostRoot + '/')) {
+    return normalizedInput.replace(normalizedHostRoot, CONTAINER_ROOT);
+  }
+  
+  return inputPath;
+}
+
+/**
  * Validate that a path exists and is a directory
  */
 async function validatePath(rootPath: string): Promise<{ valid: boolean; error?: string }> {
   try {
-    const resolvedPath = path.resolve(rootPath);
+    // Translate host path to container path if needed
+    const containerPath = translatePath(rootPath);
+    const resolvedPath = path.resolve(containerPath);
     const stats = await fs.stat(resolvedPath);
 
     if (!stats.isDirectory()) {
       return {
         valid: false,
-        error: `Path '${rootPath}' exists but is not a directory`,
+        error: `Path '${rootPath}' (resolved to '${containerPath}') exists but is not a directory`,
       };
     }
 
@@ -81,7 +115,7 @@ async function validatePath(rootPath: string): Promise<{ valid: boolean; error?:
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return {
         valid: false,
-        error: `Path '${rootPath}' does not exist`,
+        error: `Path '${rootPath}' (resolved to '${translatePath(rootPath)}') does not exist`,
       };
     }
 

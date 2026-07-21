@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "day1": {
+      "id": "day1",
+      "name": "day1",
+      "rootPath": "/workspace",
+      "createdAt": "2026-07-20T06:19:20.984Z",
+      "lastIndexed": "2026-07-20T06:19:20.984Z"
+    },
+    "file-assistant": {
+      "id": "file-assistant",
+      "name": "file-assistant",
+      "rootPath": "/workspace/file-assistant/src",
+      "createdAt": "2026-07-20T06:21:31.210Z",
+      "lastIndexed": "2026-07-20T06:21:31.210Z"
+    }
+  }
+}

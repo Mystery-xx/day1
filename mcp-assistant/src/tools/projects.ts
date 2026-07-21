@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { projectRegistry, type ProjectConfig } from '../config/project-registry.js';
+import { projectRegistry, type ProjectConfig, translatePath } from '../config/project-registry.js';
 
 // ============================================================================
 // Zod Schemas
@@ -88,9 +88,12 @@ export async function registerProject(
 ): Promise<RegisterProjectResult> {
   await projectRegistry.load();
   
+  // Translate host path to container path if needed
+  const containerRootPath = translatePath(args.rootPath);
+  
   const project = await projectRegistry.register({
     name: args.name,
-    rootPath: args.rootPath,
+    rootPath: containerRootPath,
     lastIndexed: null,
     chunkingStrategy: 'SEMANTIC',
     createdAt: new Date().toISOString(),

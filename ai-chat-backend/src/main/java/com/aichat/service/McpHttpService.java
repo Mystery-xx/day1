@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -44,61 +45,75 @@ public class McpHttpService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    
+    // Cache session IDs by base URL for Streamable HTTP transport
+    private final ConcurrentHashMap<String, String> sessionIdCache = new ConcurrentHashMap<>();
 
-    /**
-     * Initialize connection with MCP server.
-     * 
-     * @param baseUrl MCP server base URL
-     * @return InitializeResult with server info and capabilities
-     */
-    public InitializeResult initialize(String baseUrl) {
-        logger.debug("Initializing MCP connection to {}", baseUrl);
-        
-        try {
-            WebClient webClient = WebClient.builder()
-                    .baseUrl(baseUrl)
-                    .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                    .defaultHeader(HttpHeaders.ACCEPT, "application/json, text/event-stream")
-                    .build();
+/**
+ * Initialize connection with MCP server.
+ * 
+ * @param baseUrl MCP server base URL
+ * @return InitializeResult with server info, capabilities and session ID
+ */
+public InitializeResult initialize(String baseUrl) {
+    logger.debug("Initializing MCP connection to {}", baseUrl);
+    
+    try {
+        WebClient webClient = WebClient.builder()
+                .baseUrl(baseUrl)
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.ACCEPT, "application/json, text/event-stream")
+                .build();
 
-            Map<String, Object> request = buildJsonRpcRequest("initialize", Map.of(
-                "protocolVersion", "2024-11-05",
-                "capabilities", Map.of(),
-                "clientInfo", Map.of(
-                    "name", "ai-chat-backend",
-                    "version", "1.0.0"
-                )
-            ));
+        Map<String, Object> request = buildJsonRpcRequest("initialize", Map.of(
+            "protocolVersion", "2024-11-05",
+            "capabilities", Map.of(),
+            "clientInfo", Map.of(
+                "name", "ai-chat-backend",
+                "version", "1.0.0"
+            )
+        ));
 
-            // Get raw response as string to handle SSE format
-            String rawResponse = webClient.post()
-                    .bodyValue(request)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
+        // Get raw response as Mono to extract headers
+        String rawResponse = webClient.post()
+                .bodyValue(request)
+                .retrieve()
+                .toEntity(String.class)
+                .map(entity -> {
+                    // Extract session ID from response header
+                    List<String> sessionIds = entity.getHeaders().get("Mcp-Session-Id");
+                    if (sessionIds != null && !sessionIds.isEmpty()) {
+                        String sessionId = sessionIds.get(0);
+                        logger.info("MCP session established: {}", sessionId);
+                        // Store session ID for later use
+                        sessionIdCache.put(baseUrl, sessionId);
+                    }
+                    return entity.getBody();
+                })
+                .block();
 
-            // Parse SSE format: extract JSON from "data: {...}" line
-            String jsonContent = extractJsonFromSse(rawResponse);
-            JsonNode response = objectMapper.readTree(jsonContent);
+        // Parse SSE format: extract JSON from "data: {...}" line
+        String jsonContent = extractJsonFromSse(rawResponse);
+        JsonNode response = objectMapper.readTree(jsonContent);
 
-            if (response.has("error")) {
-                String errorMsg = response.get("error").toString();
-                logger.error("MCP initialize error: {}", errorMsg);
-                return new InitializeResult(false, "Initialize failed: " + errorMsg, null);
-            }
+        if (response.has("error")) {
+            String errorMsg = response.get("error").toString();
+            logger.error("MCP initialize error: {}", errorMsg);
+            return new InitializeResult(false, "Initialize failed: " + errorMsg, null);
+        }
 
-            JsonNode result = response.get("result");
-            if (result == null) {
-                return new InitializeResult(false, "No result in initialize response", null);
-            }
+        JsonNode result = response.get("result");
+        if (result == null) {
+            return new InitializeResult(false, "No result in initialize response", null);
+        }
 
-            JsonNode serverInfo = result.get("serverInfo");
-            String serverName = serverInfo != null && serverInfo.has("name") 
-                ? serverInfo.get("name").asText() 
-                : "Unknown";
+        JsonNode serverInfo = result.get("serverInfo");
+        String serverName = serverInfo != null && serverInfo.has("name") 
+            ? serverInfo.get("name").asText() 
+            : "Unknown";
 
-            logger.info("MCP server initialized: {}", serverName);
-            return new InitializeResult(true, "Connected to " + serverName, serverName);
+        logger.info("MCP server initialized: {}", serverName);
+        return new InitializeResult(true, "Connected to " + serverName, serverName);
 
         } catch (Exception e) {
             logger.error("Failed to initialize MCP server: {}", e.getMessage());
@@ -124,8 +139,18 @@ public class McpHttpService {
 
             Map<String, Object> request = buildJsonRpcRequest("tools/list", Map.of());
 
-            // Get raw response as string to handle SSE format
+            // Streamable HTTP requires Mcp-Session-Id header
+            String sessionId = sessionIdCache.get(baseUrl);
+            if (sessionId != null) {
+                logger.debug("Using session ID for tools/list: {}", sessionId);
+            }
+
             String rawResponse = webClient.post()
+                    .headers(headers -> {
+                        if (sessionId != null) {
+                            headers.add("Mcp-Session-Id", sessionId);
+                        }
+                    })
                     .bodyValue(request)
                     .retrieve()
                     .bodyToMono(String.class)
@@ -189,9 +214,20 @@ public class McpHttpService {
 
             Map<String, Object> request = buildJsonRpcRequest("tools/call", params);
 
+            // Streamable HTTP requires Mcp-Session-Id header
+            String sessionId = sessionIdCache.get(baseUrl);
+            if (sessionId != null) {
+                logger.debug("Using session ID for tools/call: {}", sessionId);
+            }
+
             // Execute HTTP call - MCP returns SSE stream (data: {...})
             // Use exchangeToMono to handle non-JSON response without throwing exception
             String responseBody = webClient.post()
+                    .headers(headers -> {
+                        if (sessionId != null) {
+                            headers.add("Mcp-Session-Id", sessionId);
+                        }
+                    })
                     .bodyValue(request)
                     .exchangeToMono(response -> {
                         if (response.statusCode().is2xxSuccessful()) {

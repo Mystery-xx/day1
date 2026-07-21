@@ -23,6 +23,10 @@ public class McpAutoConnectService {
     private static final String ASSISTANT_URL = "http://mcp-assistant:3000/mcp";
     private static final String ASSISTANT_TRANSPORT_TYPE = "HTTP";
 
+    private static final String FILE_ASSISTANT_SERVER_NAME = "file-assistant";
+    private static final String FILE_ASSISTANT_URL = "http://file-assistant:3000/mcp";
+    private static final String FILE_ASSISTANT_TRANSPORT_TYPE = "HTTP";
+
     private final McpServerRepository serverRepository;
     private final McpClientService mcpClientService;
 
@@ -37,48 +41,54 @@ public class McpAutoConnectService {
         logger.info("=== MCP Auto-Connect: Starting assistant auto-connection ===");
 
         try {
-            // Check if assistant already exists
-            Optional<McpServerConfig> existing = serverRepository.findByName(ASSISTANT_SERVER_NAME);
-
-            McpServerConfig assistantConfig;
-            if (existing.isPresent()) {
-                assistantConfig = existing.get();
-                logger.info("MCP Auto-Connect: Found existing assistant server with id={}", assistantConfig.getId());
-            } else {
-                // Create new server config for HTTP transport
-                assistantConfig = new McpServerConfig();
-                assistantConfig.setName(ASSISTANT_SERVER_NAME);
-                assistantConfig.setTransportType(ASSISTANT_TRANSPORT_TYPE);
-                assistantConfig.setUrl(ASSISTANT_URL);
-                assistantConfig.setStatus("active");
-
-                LocalDateTime now = LocalDateTime.now();
-                assistantConfig.setCreatedAt(now);
-                assistantConfig.setUpdatedAt(now);
-
-                assistantConfig = serverRepository.save(assistantConfig);
-                logger.info("MCP Auto-Connect: Created new HTTP assistant server with id={}", assistantConfig.getId());
-            }
-
-            // Connect to assistant
-            if (mcpClientService.isConnected(assistantConfig.getId())) {
-                logger.info("MCP Auto-Connect: Already connected to assistant (id={})", assistantConfig.getId());
-            } else {
-                logger.info("MCP Auto-Connect: Connecting to assistant (id={})...", assistantConfig.getId());
-                McpClientService.ConnectionResult result = mcpClientService.connectToServer(assistantConfig.getId());
-
-                if (result.isSuccess()) {
-                    logger.info("MCP Auto-Connect: SUCCESS - Connected to assistant with {} tools", result.getTools().size());
-                } else {
-                    logger.warn("MCP Auto-Connect: FAILED - {}", result.getMessage());
-                }
-            }
-
+            connectToServer(ASSISTANT_SERVER_NAME, ASSISTANT_URL, ASSISTANT_TRANSPORT_TYPE);
+            connectToServer(FILE_ASSISTANT_SERVER_NAME, FILE_ASSISTANT_URL, FILE_ASSISTANT_TRANSPORT_TYPE);
             logger.info("=== MCP Auto-Connect: Completed ===");
 
         } catch (Exception e) {
             logger.error("MCP Auto-Connect: ERROR during auto-connection - {}", e.getMessage(), e);
-            // Don't rethrow - don't block application startup
+        }
+    }
+
+    private void connectToServer(String name, String url, String transportType) {
+        logger.info("MCP Auto-Connect: Connecting to {} at {}...", name, url);
+        
+        try {
+            Optional<McpServerConfig> existing = serverRepository.findByName(name);
+
+            McpServerConfig serverConfig;
+            if (existing.isPresent()) {
+                serverConfig = existing.get();
+                logger.info("MCP Auto-Connect: Found existing server '{}' with id={}", name, serverConfig.getId());
+            } else {
+                serverConfig = new McpServerConfig();
+                serverConfig.setName(name);
+                serverConfig.setTransportType(transportType);
+                serverConfig.setUrl(url);
+                serverConfig.setStatus("active");
+
+                LocalDateTime now = LocalDateTime.now();
+                serverConfig.setCreatedAt(now);
+                serverConfig.setUpdatedAt(now);
+
+                serverConfig = serverRepository.save(serverConfig);
+                logger.info("MCP Auto-Connect: Created new server '{}' with id={}", name, serverConfig.getId());
+            }
+
+            if (mcpClientService.isConnected(serverConfig.getId())) {
+                logger.info("MCP Auto-Connect: Already connected to '{}' (id={})", name, serverConfig.getId());
+            } else {
+                logger.info("MCP Auto-Connect: Connecting to '{}' (id={})...", name, serverConfig.getId());
+                McpClientService.ConnectionResult result = mcpClientService.connectToServer(serverConfig.getId());
+
+                if (result.isSuccess()) {
+                    logger.info("MCP Auto-Connect: SUCCESS - Connected to '{}' with {} tools", name, result.getTools().size());
+                } else {
+                    logger.warn("MCP Auto-Connect: FAILED - {}", result.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            logger.error("MCP Auto-Connect: ERROR connecting to '{}' - {}", name, e.getMessage(), e);
         }
     }
 }
